@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import uuid
 import datetime
 import json
+import pytz
 import os
 from io import BytesIO
 from PIL import Image
@@ -258,6 +259,10 @@ if url_id:
         </script>
         """, height=0, width=0)
 
+       # Captura dados de rede do cliente via chamadas Javascript assíncronas em tela
+        ip_capturado = st_javascript("fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => d.ip)")
+        ua_capturado = st_javascript("window.navigator.userAgent")
+
         if st.button("💾 Enviar Assinatura Concluída", type="primary", use_container_width=True):
             tem_desenho = False
             if canvas_result.json_data is not None and len(canvas_result.json_data.get("objects", [])) > 0:
@@ -266,12 +271,9 @@ if url_id:
             if not tem_desenho:
                 st.error("O quadro de assinatura está vazio. Por favor, faça sua assinatura antes de clicar em enviar.")
             else:
-                # Captura dados de rede do cliente via chamadas Javascript assíncronas em tela
-                ip_capturado = st_javascript("fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => d.ip)")
-                ua_capturado = st_javascript("window.navigator.userAgent")
-
-                ip_final = str(ip_capturado) if ip_capturado else "IP Interno/Não identificado"
-                ua_final = str(ua_capturado) if ua_capturado else "Dispositivo Desconhecido"
+                # Garante que se o JS atrasar, não salve "None" ou "False"
+                ip_final = str(ip_capturado) if (ip_capturado and ip_capturado != "False") else "IP Não identificado"
+                ua_final = str(ua_capturado) if (ua_capturado and ua_capturado != "False") else "Dispositivo Desconhecido"
 
                 img_array = canvas_result.image_data.astype("uint8")
                 img = Image.fromarray(img_array)
@@ -282,8 +284,9 @@ if url_id:
                 img_final.save(buffered, format="PNG")
                 img_bytes = buffered.getvalue()
 
-                # Mudamos para registrar data, hora, minutos e segundos na auditoria
-                data_atual = datetime.datetime.now().strftime("%d/%m/%Y às %H:%M:%S")
+                # 🔥 CORREÇÃO DA HORA: Forçando o fuso horário de Brasília (GMT-3)
+                fuso_brasilia = pytz.timezone("America/Sao_Paulo")
+                data_atual = datetime.datetime.now(fuso_brasilia).strftime("%d/%m/%Y às %H:%M:%S")
 
                 for f in funcionarios_data:
                     if f["id"] == colaborador["id"]:
@@ -296,7 +299,6 @@ if url_id:
 
                 salvar_funcionarios(funcionarios_data)
                 st.rerun()
-
 else:
     # --- VISÃO DA TI COM TELA DE LOGIN SEGURA ---
     st.markdown("<h1 style='text-align: center; color: #0f172a;'>🏢 Gestão de Integração Ferpam</h1>", unsafe_allow_html=True)
