@@ -3,3 +3,4 @@ streamlit-drawable-canvas
 fpdf2
 pillow
 numpy
+streamlit-javascript==0.1.5
