@@ -235,8 +235,8 @@ with tab_cadastro:
         if nome_cad and cargo_cad and email_cad:
             funcionario_id = str(uuid.uuid4())[:8]
             
-            # ATENÇÃO: Link modificado para usar URL relativa dinâmica em produção
-            link_unico = f"https://sua-url-aqui.streamlit.app/?id={funcionario_id}"
+            # 🔥 O SEU LINK ATUALIZADO VAI AQUI:
+            link_unico = f"https://termo-ferpam.streamlit.app/?id={funcionario_id}"
             
             setor_envio = setor_cad if setor_cad else "Geral"
             
