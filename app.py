@@ -17,7 +17,7 @@ from email.mime.multipart import MIMEMultipart
 # Configurações de layout
 st.set_page_config(page_title="Portal de Assinaturas - Ferpam", page_icon="🏢", layout="centered")
 
-# CSS CUSTOMIZADO
+# CSS CUSTOMIZADO PARA DEIXAR O TERMO BONITO
 st.markdown("""
     <style>
     .main { background-color: #f8fafc; }
@@ -68,7 +68,7 @@ def salvar_funcionarios(lista):
 
 funcionarios_data = carregar_funcionarios()
 
-# TEXTO DAS 12 DIRETRIZES DO DOCUMENTO (FORMATADO EM HTML PARA A TELA)
+# VARIÁVEL DE TEXTO EM HTML DO TERMO
 TEXTO_TERMO_HTML = """
 <div class="termo-doc">
     <h3 style="text-align:center; margin-top:0; margin-bottom:20px; color: #0f172a;">TERMO DE RESPONSABILIDADE E USO DOS RECURSOS DE TI</h3>
@@ -120,16 +120,15 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
     intro = (
         "Este Termo tem como objetivo estabelecer as diretrizes para o uso adequado dos recursos de "
         "Tecnologia da Informação disponibilizados pela Ferpam, garantindo a segurança, a integridade "
-        "e a confidencialidade das informações da empresa.\n\n"
+        "e a confidentiality das informações da empresa.\n\n"
         "Ao receber acesso aos sistemas, equipamentos e recursos tecnológicos da Ferpam, o colaborador "
         "declara estar ciente e concorda com as seguintes responsabilidades:\n\n"
     )
     pdf.multi_cell(0, 5, intro)
 
-    # TEXTO PURO DO PDF (Sem nenhuma tag HTML para não sujar o documento final)
     diretrizes = [
         "1. Confidencialidade das Informações\nTodas as informações acessadas durante as atividades profissionais são de uso exclusivo da Ferpam e não devem ser divulgadas, compartilhadas ou utilizadas para fins pessoais ou externos sem autorização.\n",
-        "2. Instalação de Programas e Equipamentos\nA instalação de programas, aplicativos, extensões, equipamentos ou qualquer alteração nos computadores and dispositivos da empresa deve ser realizada exclusivamente pelo setor de TI. Não é permitido instalar softwares ou aplicativos por conta própria.\n",
+        "2. Instalação de Programas e Equipamentos\nA instalação de programas, aplicativos, extensões, equipamentos ou qualquer alteração nos computadores e dispositivos da empresa deve ser realizada exclusivamente pelo setor de TI. Não é permitido instalar softwares ou aplicativos por conta própria.\n",
         "3. Uso de E-mails e Dispositivos Pessoais\nO uso de e-mails pessoais, pendrives, cartões de memória, serviços de armazenamento em nuvem e aplicativos de comunicação para manipulação de informações da empresa deve ocorrer apenas quando autorizado pela gestão ou pelo setor de TI.\n",
         "4. Uso da Internet\nO acesso à internet disponibilizado pela empresa deve ser utilizado prioritariamente para atividades relacionadas ao trabalho. O acesso a conteúdos inadequados, ilegais ou que possam comprometer a segurança da empresa é proibido.\n",
         "5. Senhas de Acesso\nAs senhas fornecidas para acesso aos sistemas são pessoais e intransferíveis. Não é permitido compartilhar senhas com outros colaboradores ou terceiros.\n",
@@ -203,7 +202,7 @@ Equipe de TI - Ferpam"""
         servidor = smtplib.SMTP("smtp.gmail.com", 587)
         servidor.starttls()
         servidor.login(EMAIL, SENHA)
-        servidor.sendmail(EMAIL, destinatario, mensagem.as_string())
+        servidor.sendmail(EMAIL, destinatario, message=mensagem.as_string())
         servidor.quit()
         return True, "Sucesso"
     except Exception as erro:
@@ -214,7 +213,7 @@ Equipe de TI - Ferpam"""
 url_id = st.query_params.get("id", None)
 
 if url_id:
-    # --- VISÃO DO COLABORADOR (Clica no Link) ---
+    # --- VISÃO DO COLABORADOR ---
     colaborador = next((f for f in funcionarios_data if f["id"] == url_id), None)
     
     if not colaborador:
@@ -231,7 +230,7 @@ if url_id:
         st.markdown("<h2 style='text-align: center; color: #0f172a;'>🏢 Assinatura de Termo Digital - Ferpam</h2>", unsafe_allow_html=True)
         st.info(f"Colaborador: {colaborador['nome']} | Cargo: {colaborador['cargo']}")
         
-        # 🔥 AQUI ESTAVA O ERRO: Agora renderiza corretamente a variável HTML global!
+        # RENDERIZAÇÃO DO TERMO COM A CORREÇÃO DE EXIBIÇÃO HTML ATIVADA
         st.markdown(TEXTO_TERMO_HTML, unsafe_allow_html=True)
         
         st.subheader("🖊️ Assine abaixo utilizando o mouse ou o dedo:")
@@ -291,7 +290,7 @@ if url_id:
                 st.rerun()
 
 else:
-    # --- VISÃO DA TI (Sem ID na URL) ---
+    # --- VISÃO DA TI ---
     st.markdown("<h1 style='text-align: center; color: #0f172a;'>🏢 Gestão de Integração Ferpam</h1>", unsafe_allow_html=True)
     st.markdown("---")
 
