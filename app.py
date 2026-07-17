@@ -73,7 +73,7 @@ def renderizar_termo_tela():
 <p><b>1. Confidencialidade das Informações</b><br>Todas as informações acessadas durante as atividades profissionais são de uso exclusivo da Ferpam e não devem ser divulgadas, compartilhadas ou utilizadas para fins pessoais ou externos sem autorização.</p>
 <p><b>2. Instalação de Programas e Equipamentos</b><br>A instalação de programas, aplicativos, extensões, equipamentos ou qualquer alteração nos computadores e dispositivos da empresa deve ser realizada exclusivamente pelo setor de TI. Não é permitido instalar softwares ou aplicativos por conta própria.</p>
 <p><b>3. Uso de E-mails e Dispositivos Pessoais</b><br>O uso de e-mails pessoais, pendrives, cartões de memória, serviços de armazenamento em nuvem e aplicativos de comunicação para manipulação de informações da empresa deve ocorrer apenas quando autorizado pela gestão ou pelo setor de TI.</p>
-<p><b>4. Uso da Internet</b><br>O acesso à internet disponibilizado pela empresa deve ser utilizado prioritariamente para atividades relacionadas ao trabalho. O acesso a conteúdos inadequados, ilegais ou que possam comprometer a segurança da empresa é proibido.</p>
+<p><b>4. Uso da Internet</b><br>O acesso à internet disponibilizado pela empresa deve ser utilizado prioritariamente para atividades relacionadas ao trabalho. O acesso a conteúdos inadequados, redes sociais, sites ilegais ou que possam comprometer a segurança da empresa é proibido.</p>
 <p><b>5. Senhas de Acesso</b><br>As senhas fornecidas para acesso aos sistemas são pessoais e intransferíveis. Não é permitido compartilhar senhas com outros colaboradores ou terceiros.</p>
 <p><b>6. Segurança das Senhas</b><br>O colaborador compromete-se a:<br>
 - Não anotar senhas em locais visíveis;<br>
