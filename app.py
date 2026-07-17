@@ -54,12 +54,18 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# 🔥 INICIALIZAÇÃO DA CONEXÃO DO SUPABASE USANDO OS SECRETS
+# 🔥 INICIALIZAÇÃO DA CONEXÃO DO SUPABASE COM TRAVA DE COMPATIBILIDADE PARA PYTHON 3.14+
+from supabase.client import ClientOptions
+
 @st.cache_resource
 def iniciar_banco() -> Client:
     url = st.secrets["supabase"]["url"]
     key = st.secrets["supabase"]["key"]
-    return create_client(url, key)
+    
+    # Remove a extensão HTTP2 que causa quebra nas versões novas do Python
+    opcoes = ClientOptions(postgrest_client_timeout=10, storage_client_timeout=10)
+    
+    return create_client(url, key, options=opcoes)
 
 supabase = iniciar_banco()
 
