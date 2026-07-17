@@ -25,10 +25,11 @@ st.markdown("""
         background-color: white; padding: 30px; border-radius: 8px;
         border: 1px solid #cbd5e1; color: #334155; font-size: 14.5px;
         line-height: 1.6; margin-bottom: 20px;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
     }
     .termo-doc p {
         margin-top: 0px !important;
-        margin-bottom: 10px !important;
+        margin-bottom: 12px !important;
         padding: 0px !important;
     }
     iframe[title="streamlit_drawable_canvas.st_canvas"] {
@@ -208,7 +209,7 @@ Equipe de TI - Ferpam"""
         return False, str(erro)
 
 
-# ---------------- LOGICA DE ROTEAMENTO (QUEM ACESSA O QUE) ----------------
+# ---------------- LOGICA DE ROTEAMENTO ----------------
 url_id = st.query_params.get("id", None)
 
 if url_id:
@@ -218,7 +219,6 @@ if url_id:
     if not colaborador:
         st.error("⚠️ Link de assinatura inválido ou expirado. Entre em contato com o setor de TI.")
     elif colaborador["assinado"]:
-        # Mensagem que aparece após assinar ou se ele tentar clicar no link de novo
         st.markdown(f"""
             <div class="sucesso-box">
                 <h1 style="color: #166534; margin-top:0;">✓ Termo Assinado com Sucesso!</h1>
@@ -227,11 +227,14 @@ if url_id:
             </div>
         """, unsafe_allow_html=True)
     else:
-        # Mostra apenas o Termo e a Assinatura para o Colaborador
         st.markdown("<h2 style='text-align: center; color: #0f172a;'>🏢 Assinatura de Termo Digital - Ferpam</h2>", unsafe_allow_html=True)
-        st.info(f"Olá, {colaborador['nome']} ({colaborador['cargo']}). Por favor, leia atentamente as diretrizes abaixo e assine no campo indicado.")
         
+        # Correção aqui: Mostra as informações limpas do colaborador
+        st.info(f"Colaborador: {colaborador['nome']} | Cargo: {colaborador['cargo']}")
+        
+        # 🔥 CORREÇÃO PRINCIPAL: Renderiza o HTML do termo corretamente sem mostrar as tags de texto!
         st.markdown(TEXTO_TERMO_HTML, unsafe_allow_html=True)
+        
         st.subheader("🖊️ Assine abaixo utilizando o mouse ou o dedo:")
 
         canvas_result = st_canvas(
@@ -289,7 +292,7 @@ if url_id:
                 st.rerun()
 
 else:
-    # --- VISÃO DA TI (Acesso comum sem ID na URL) ---
+    # --- VISÃO DA TI ---
     st.markdown("<h1 style='text-align: center; color: #0f172a;'>🏢 Gestão de Integração Ferpam</h1>", unsafe_allow_html=True)
     st.markdown("---")
 
@@ -332,7 +335,6 @@ else:
                 st.error("Por favor, preencha os campos obrigatórios.")
 
     # --- ABA 2: ARQUIVO ---
-  # --- ABA 2: ARQUIVO ---
     with tab_arquivo:
         st.markdown("### 📂 Contratos Concluídos")
         funcionarios_data = carregar_funcionarios()
