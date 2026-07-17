@@ -42,6 +42,11 @@ st.markdown("""
         background-color: #f0fdf4; border: 1px solid #bbf7d0; color: #166534;
         padding: 30px; border-radius: 8px; text-align: center; margin-top: 50px;
     }
+    .login-box {
+        background-color: white; padding: 25px; border-radius: 8px;
+        border: 1px solid #cbd5e1; margin-top: 40px;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -72,8 +77,8 @@ def renderizar_termo_tela():
 <p>Ao receber acesso aos sistemas, equipamentos e recursos tecnológicos da Ferpam, o colaborador declara estar ciente e concorda com as seguintes responsabilidades:</p>
 <p><b>1. Confidencialidade das Informações</b><br>Todas as informações acessadas durante as atividades profissionais são de uso exclusivo da Ferpam e não devem ser divulgadas, compartilhadas ou utilizadas para fins pessoais ou externos sem autorização.</p>
 <p><b>2. Instalação de Programas e Equipamentos</b><br>A instalação de programas, aplicativos, extensões, equipamentos ou qualquer alteração nos computadores e dispositivos da empresa deve ser realizada exclusivamente pelo setor de TI. Não é permitido instalar softwares ou aplicativos por conta própria.</p>
-<p><b>3. Uso de E-mails e Dispositivos Pessoais</b><br>O uso de e-mails pessoais, pendrives, cartões de memória, serviços de armazenamento em nuvem e aplicativos de comunicação para manipulação de informações da empresa deve ocorrer apenas quando autorizado pela gestão ou pelo setor de TI.</p>
-<p><b>4. Uso da Internet</b><br>O acesso à internet disponibilizado pela empresa deve ser utilizado prioritariamente para atividades relacionadas ao trabalho. O acesso a conteúdos inadequados, redes sociais, sites ilegais ou que possam comprometer a segurança da empresa é proibido.</p>
+<p><b>3. Uso de E-mails e Dispositivos Pessoais</b><br>O uso de e-mails pessoais, pendrives, cartões de memória, serviços de armazenamento em nuvem and aplicativos de comunicação para manipulação de informações da empresa deve ocorrer apenas quando autorizado pela gestão ou pelo setor de TI.</p>
+<p><b>4. Uso da Internet</b><br>O acesso à internet disponibilizado pela empresa deve ser utilizado prioritariamente para atividades relacionadas ao trabalho. O acesso a conteúdos inadequados, ilegais ou que possam comprometer a segurança da empresa é proibido.</p>
 <p><b>5. Senhas de Acesso</b><br>As senhas fornecidas para acesso aos sistemas são pessoais e intransferíveis. Não é permitido compartilhar senhas com outros colaboradores ou terceiros.</p>
 <p><b>6. Segurança das Senhas</b><br>O colaborador compromete-se a:<br>
 - Não anotar senhas em locais visíveis;<br>
@@ -160,7 +165,8 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
 
 def enviar_email(destinatario, nome, link):
     EMAIL = "suporte.ti@ferpam.com.br"
-    SENHA = "rdgx gjto nfag afbk" 
+    # 🔥 ETAPA 2: Senha removida do código! Agora ela é lida com segurança dos Secrets do Streamlit
+    SENHA = st.secrets["email"]["senha_gmail"] 
     
     mensagem = MIMEMultipart()
     mensagem["From"] = EMAIL
@@ -214,7 +220,6 @@ if url_id:
         st.markdown("<h2 style='text-align: center; color: #0f172a;'>🏢 Assinatura de Termo Digital - Ferpam</h2>", unsafe_allow_html=True)
         st.info(f"Colaborador: {colaborador['nome']} | Cargo: {colaborador['cargo']}")
         
-        # 🔥 MODIFICADO AQUI: Chamamos a função isolada para renderizar o termo de forma limpa!
         renderizar_termo_tela()
         
         st.subheader("🖊️ Assine abaixo utilizando o mouse ou o dedo:")
@@ -274,94 +279,119 @@ if url_id:
                 st.rerun()
 
 else:
-    # --- VISÃO DA TI ---
+    # --- 🔥 ETAPA 1: VISÃO DA TI COM TELA DE LOGIN SEGURA ---
     st.markdown("<h1 style='text-align: center; color: #0f172a;'>🏢 Gestão de Integração Ferpam</h1>", unsafe_allow_html=True)
-    st.markdown("---")
+    
+    # Gerencia o estado do login
+    if "autenticado" not in st.session_state:
+        st.session_state["autenticado"] = False
 
-    tab_cadastro, tab_arquivo = st.tabs([
-        "➕ Cadastrar Integrante", 
-        "📂 Arquivo de Contratos"
-    ])
-
-    # --- ABA 1: CADASTRO ---
-    with tab_cadastro:
-        st.markdown("### 📝 Dados do Novo Colaborador")
-        col_a, col_b = st.columns(2)
-        with col_a:
-            nome_cad = st.text_input("Nome Completo", placeholder="Ex: João Neto Silva", key="cad_nome")
-            cargo_cad = st.text_input("Cargo", placeholder="Ex: Assistente Administrativo", key="cad_cargo")
-        with col_b:
-            email_cad = st.text_input("E-mail", placeholder="Ex: joao@ferpam.com.br", key="cad_email")
-            setor_cad = st.text_input("Setor", placeholder="Ex: TI", key="cad_setor")
-
-        if st.button("✨ Cadastrar para Assinatura", use_container_width=True):
-            if nome_cad and cargo_cad and email_cad:
-                funcionario_id = str(uuid.uuid4())[:8]
-                link_unico = f"https://termo-ferpam.streamlit.app/?id={funcionario_id}"
-                setor_envio = setor_cad if setor_cad else "Geral"
-                
-                novo_funcionario = {
-                    "id": funcionario_id, "nome": nome_cad, "cargo": cargo_cad, "setor": setor_envio,
-                    "email": email_cad, "assinado": False, "assinatura_hex": None, "data_hora": "", "pdf_hex": None
-                }
-                
-                enviado, motivo_erro = enviar_email(email_cad, nome_cad, link_unico)
-                
-                if enviado:
-                    funcionarios_data.append(novo_funcionario)
-                    salvar_funcionarios(funcionarios_data)
-                    st.success(f"✅ {nome_cad} cadastrado e e-mail enviado com sucesso!")
-                else:
-                    st.error(f"❌ Falha crítica ao enviar e-mail: {motivo_erro}")
-            else:
-                st.error("Por favor, preencha os campos obrigatórios.")
-
-  # --- ABA 2: ARQUIVO ---
-    with tab_arquivo:
-        st.markdown("### 📂 Contratos Concluídos")
-        funcionarios_data = carregar_funcionarios()
-        assinados = [f for f in funcionarios_data if f["assinado"]]
-        pendentes_lista = [f for f in funcionarios_data if not f["assinado"]]
+    if not st.session_state["autenticado"]:
+        st.markdown('<div class="login-box">', unsafe_allow_html=True)
+        st.markdown("### 🔐 Área Restrita - Setor de TI")
+        usuario_input = st.text_input("Usuário")
+        senha_input = st.text_input("Senha", type="password")
         
-        if not pendentes_lista:
-            st.caption("Não há assinaturas pendentes no momento.")
-        else:
-            st.markdown(f"**Pendentes de Assinatura ({len(pendentes_lista)}):**")
-            for p in pendentes_lista:
-                col_pend1, col_pend2 = st.columns([4, 1])
-                with col_pend1:
-                    st.caption(f"⏳ {p['nome']} ({p['email']}) - ID: {p['id']}")
-                with col_pend2:
-                    if st.button("❌", key=f"del_pend_{p['id']}", help="Cancelar envio/Excluir pendente"):
-                        funcionarios_data = [func for func in funcionarios_data if func["id"] != p["id"]]
+        if st.button("Entrar no Painel", use_container_width=True, type="primary"):
+            # Compara com as credenciais que você salvou no painel do Streamlit Secrets
+            if usuario_input == st.secrets["credentials"]["usuario_ti"] and senha_input == st.secrets["credentials"]["senha_ti"]:
+                st.session_state["autenticado"] = True
+                st.rerun()
+            else:
+                st.error("Usuário ou Senha inválidos.")
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        # Botão de sair do painel no topo direito
+        st.sidebar.markdown(f"Logado como: **{st.secrets['credentials']['usuario_ti']}**")
+        if st.sidebar.button("🚪 Sair do Painel"):
+            st.session_state["autenticado"] = False
+            st.rerun()
+
+        st.markdown("---")
+        tab_cadastro, tab_arquivo = st.tabs([
+            "➕ Cadastrar Integrante", 
+            "📂 Arquivo de Contratos"
+        ])
+
+        # --- ABA 1: CADASTRO ---
+        with tab_cadastro:
+            st.markdown("### 📝 Dados do Novo Colaborador")
+            col_a, col_b = st.columns(2)
+            with col_a:
+                nome_cad = st.text_input("Nome Completo", placeholder="Ex: João Neto Silva", key="cad_nome")
+                cargo_cad = st.text_input("Cargo", placeholder="Ex: Assistente Administrativo", key="cad_cargo")
+            with col_b:
+                email_cad = st.text_input("E-mail", placeholder="Ex: joao@ferpam.com.br", key="cad_email")
+                setor_cad = st.text_input("Setor", placeholder="Ex: TI", key="cad_setor")
+
+            if st.button("✨ Cadastrar para Assinatura", use_container_width=True):
+                if nome_cad and cargo_cad and email_cad:
+                    funcionario_id = str(uuid.uuid4())[:8]
+                    link_unico = f"https://termo-ferpam.streamlit.app/?id={funcionario_id}"
+                    setor_envio = setor_cad if setor_cad else "Geral"
+                    
+                    novo_funcionario = {
+                        "id": funcionario_id, "nome": nome_cad, "cargo": cargo_cad, "setor": setor_envio,
+                        "email": email_cad, "assinado": False, "assinatura_hex": None, "data_hora": "", "pdf_hex": None
+                    }
+                    
+                    enviado, motivo_erro = enviar_email(email_cad, nome_cad, link_unico)
+                    
+                    if enviado:
+                        funcionarios_data.append(novo_funcionario)
                         salvar_funcionarios(funcionarios_data)
-                        st.rerun()
+                        st.success(f"✅ {nome_cad} cadastrado e e-mail enviado com sucesso!")
+                    else:
+                        st.error(f"❌ Falha crítica ao enviar e-mail: {motivo_erro}")
+                else:
+                    st.error("Por favor, preencha os campos obrigatórios.")
 
-        st.divider()
-
-        if not assinados:
-            st.info("Nenhum termo assinado armazenado em banco ainda.")
-        else:
-            for f in assinados:
-                col_info, col_botoes = st.columns([3, 2])
-                with col_info:
-                    st.markdown(f"##### 📄 {f['nome']}")
-                    st.caption(f"**Cargo:** {f['cargo']} | **Setor:** {f['setor']} | **Em:** {f['data_hora']}")
-                with col_botoes:
-                    sub_col1, sub_col2 = st.columns(2)
-                    with sub_col1:
-                        if f.get("pdf_hex"):
-                            st.download_button(
-                                "📥 Baixar PDF", 
-                                bytes.fromhex(f["pdf_hex"]), 
-                                file_name=f"Termo_TI_{f['nome'].replace(' ', '_')}.pdf", 
-                                mime="application/pdf", 
-                                key=f"down_{f['id']}"
-                            )
-                    with sub_col2:
-                        if st.button("❌ Deletar", key=f"del_{f['id']}", type="secondary"):
-                            funcionarios_data = [func for func in funcionarios_data if func["id"] != f["id"]]
+        # --- ABA 2: ARQUIVO ---
+        with tab_arquivo:
+            st.markdown("### 📂 Contratos Concluídos")
+            funcionarios_data = carregar_funcionarios()
+            assinados = [f for f in funcionarios_data if f["assinado"]]
+            pendentes_lista = [f for f in funcionarios_data if not f["assinado"]]
+            
+            if not pendentes_lista:
+                st.caption("Não há assinaturas pendentes no momento.")
+            else:
+                st.markdown(f"**Pendentes de Assinatura ({len(pendentes_lista)}):**")
+                for p in pendentes_lista:
+                    col_pend1, col_pend2 = st.columns([4, 1])
+                    with col_pend1:
+                        st.caption(f"⏳ {p['nome']} ({p['email']}) - ID: {p['id']}")
+                    with col_pend2:
+                        if st.button("❌", key=f"del_pend_{p['id']}", help="Cancelar envio/Excluir pendente"):
+                            funcionarios_data = [func for func in funcionarios_data if func["id"] != p["id"]]
                             salvar_funcionarios(funcionarios_data)
-                            st.toast(f"Registro de {f['nome']} removido com sucesso!")
                             st.rerun()
-                st.divider()
+
+            st.divider()
+
+            if not assinados:
+                st.info("Nenhum termo assinado armazenado em banco ainda.")
+            else:
+                for f in assinados:
+                    col_info, col_botoes = st.columns([3, 2])
+                    with col_info:
+                        st.markdown(f"##### 📄 {f['nome']}")
+                        st.caption(f"**Cargo:** {f['cargo']} | **Setor:** {f['setor']} | **Em:** {f['data_hora']}")
+                    with col_botoes:
+                        sub_col1, sub_col2 = st.columns(2)
+                        with sub_col1:
+                            if f.get("pdf_hex"):
+                                st.download_button(
+                                    "📥 Baixar PDF", 
+                                    bytes.fromhex(f["pdf_hex"]), 
+                                    file_name=f"Termo_TI_{f['nome'].replace(' ', '_')}.pdf", 
+                                    mime="application/pdf", 
+                                    key=f"down_{f['id']}"
+                                )
+                        with sub_col2:
+                            if st.button("❌ Deletar", key=f"del_{f['id']}", type="secondary"):
+                                funcionarios_data = [func for func in funcionarios_data if func["id"] != f["id"]]
+                                salvar_funcionarios(funcionarios_data)
+                                st.toast(f"Registro de {f['nome']} removido com sucesso!")
+                                st.rerun()
+                    st.divider()
