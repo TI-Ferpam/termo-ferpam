@@ -11,11 +11,12 @@ from fpdf import FPDF
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from streamlit_javascript import st_javascript
 
 # Configurações de layout
 st.set_page_config(page_title="Portal de Assinaturas - Ferpam", page_icon="🏢", layout="centered")
 
-# CSS CUSTOMIZADO PARA FORMATAR O DOCUMENTO
+# CSS CUSTOMIZADO
 st.markdown("""
     <style>
     .main { background-color: #f8fafc; }
@@ -69,7 +70,6 @@ def salvar_funcionarios(lista):
     except Exception as e:
         st.error(f"Erro ao salvar dados no banco: {e}")
 
-# FUNÇÃO PARA GERAR O TERMO EM TELA SEM ERROS DE ESCOPO
 def renderizar_termo_tela():
     html_conteudo = """<div class="termo-doc">
 <h3 style="text-align:center; margin-top:0; margin-bottom:20px; color: #0f172a;">TERMO DE RESPONSABILIDADE E USO DOS RECURSOS DE TI</h3>
@@ -77,7 +77,7 @@ def renderizar_termo_tela():
 <p>Ao receber acesso aos sistemas, equipamentos e recursos tecnológicos da Ferpam, o colaborador declara estar ciente e concorda com as seguintes responsabilidades:</p>
 <p><b>1. Confidencialidade das Informações</b><br>Todas as informações acessadas durante as atividades profissionais são de uso exclusivo da Ferpam e não devem ser divulgadas, compartilhadas ou utilizadas para fins pessoais ou externos sem autorização.</p>
 <p><b>2. Instalação de Programas e Equipamentos</b><br>A instalação de programas, aplicativos, extensões, equipamentos ou qualquer alteração nos computadores e dispositivos da empresa deve ser realizada exclusivamente pelo setor de TI. Não é permitido instalar softwares ou aplicativos por conta própria.</p>
-<p><b>3. Uso de E-mails e Dispositivos Pessoais</b><br>O uso de e-mails pessoais, pendrives, cartões de memória, serviços de armazenamento em nuvem and aplicativos de comunicação para manipulação de informações da empresa deve ocorrer apenas quando autorizado pela gestão ou pelo setor de TI.</p>
+<p><b>3. Uso de E-mails e Dispositivos Pessoais</b><br>O uso de e-mails pessoais, pendrives, cartões de memória, serviços de armazenamento em nuvem e aplicativos de comunicação para manipulação de informações da empresa deve ocorrer apenas quando autorizado pela gestão ou pelo setor de TI.</p>
 <p><b>4. Uso da Internet</b><br>O acesso à internet disponibilizado pela empresa deve ser utilizado prioritariamente para atividades relacionadas ao trabalho. O acesso a conteúdos inadequados, ilegais ou que possam comprometer a segurança da empresa é proibido.</p>
 <p><b>5. Senhas de Acesso</b><br>As senhas fornecidas para acesso aos sistemas são pessoais e intransferíveis. Não é permitido compartilhar senhas com outros colaboradores ou terceiros.</p>
 <p><b>6. Segurança das Senhas</b><br>O colaborador compromete-se a:<br>
@@ -96,7 +96,8 @@ def renderizar_termo_tela():
 </div>"""
     st.markdown(html_conteudo, unsafe_allow_html=True)
 
-def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funcionario_id):
+# 🔥 DICA DE OURO: Função agora gera o PDF aplicando os metadados de auditoria e segurança jurídica
+def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funcionario_id, ip_cliente="Não capturado", ua_cliente="Não capturado"):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
@@ -143,18 +144,29 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
     pdf.cell(0, 6, f"Nome Completo: {nome}", ln=True)
     pdf.cell(0, 6, f"Cargo: {cargo}", ln=True)
     pdf.cell(0, 6, f"Setor: {setor}", ln=True)
-    pdf.cell(0, 6, f"Data: {data_hora}", ln=True)
+    pdf.cell(0, 6, f"Data e Hora do Registro: {data_hora}", ln=True)
 
     assinatura_temp = f"assinatura_temp_{funcionario_id}.png"
     try:
         with open(assinatura_temp, "wb") as f:
             f.write(assinatura_bytes)
-        pdf.ln(5)
-        pdf.cell(0, 6, "Assinatura:", ln=True)
-        pdf.image(assinatura_temp, x=20, y=pdf.get_y(), w=75)
+        pdf.ln(3)
+        pdf.cell(0, 6, "Assinatura Digitalizada:", ln=True)
+        pdf.image(assinatura_temp, x=20, y=pdf.get_y(), w=65)
+        pdf.ln(25) # Espaço para não encavalar o bloco de metadados abaixo da imagem
     finally:
         if os.path.exists(assinatura_temp):
             os.remove(assinatura_temp)
+
+    # Bloco de Evidências Digitais (Auditoria Técnica)
+    pdf.set_font("Arial", "I", 8)
+    pdf.set_text_color(100, 116, 139)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(2)
+    pdf.cell(0, 4, f"Metadados de Validação Jurídica (Lei 14.063/2020)", ln=True)
+    pdf.cell(0, 4, f"ID de Autenticação do Sistema: {funcionario_id}", ln=True)
+    pdf.cell(0, 4, f"Endereço de IP Origem: {ip_cliente}", ln=True)
+    pdf.multi_cell(0, 4, f"Assinatura do Dispositivo (User-Agent): {ua_cliente}")
 
     pdf_bytes = pdf.output(dest="S")
     if isinstance(pdf_bytes, str):
@@ -165,7 +177,6 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
 
 def enviar_email(destinatario, nome, link):
     EMAIL = "suporte.ti@ferpam.com.br"
-    # 🔥 ETAPA 2: Senha removida do código! Agora ela é lida com segurança dos Secrets do Streamlit
     SENHA = st.secrets["email"]["senha_gmail"] 
     
     mensagem = MIMEMultipart()
@@ -255,6 +266,13 @@ if url_id:
             if not tem_desenho:
                 st.error("O quadro de assinatura está vazio. Por favor, faça sua assinatura antes de clicar em enviar.")
             else:
+                # Captura dados de rede do cliente via chamadas Javascript assíncronas em tela
+                ip_capturado = st_javascript("fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => d.ip)")
+                ua_capturado = st_javascript("window.navigator.userAgent")
+
+                ip_final = str(ip_capturado) if ip_capturado else "IP Interno/Não identificado"
+                ua_final = str(ua_capturado) if ua_capturado else "Dispositivo Desconhecido"
+
                 img_array = canvas_result.image_data.astype("uint8")
                 img = Image.fromarray(img_array)
                 background = Image.new("RGBA", img.size, (255, 255, 255))
@@ -264,25 +282,25 @@ if url_id:
                 img_final.save(buffered, format="PNG")
                 img_bytes = buffered.getvalue()
 
-                data_atual = datetime.datetime.now().strftime("%d/%m/%Y")
-                pdf_gerado_bytes = gerar_pdf_contrato(colaborador["nome"], colaborador["cargo"], colaborador["setor"], data_atual, img_bytes, colaborador["id"])
+                # Mudamos para registrar data, hora, minutos e segundos na auditoria
+                data_atual = datetime.datetime.now().strftime("%d/%m/%Y às %H:%M:%S")
 
                 for f in funcionarios_data:
                     if f["id"] == colaborador["id"]:
                         f["assinado"] = True
                         f["assinatura_hex"] = img_bytes.hex()
                         f["data_hora"] = data_atual
-                        f["pdf_hex"] = pdf_gerado_bytes.hex()
+                        f["ip_auditoria"] = ip_final
+                        f["ua_auditoria"] = ua_final
                         break
 
                 salvar_funcionarios(funcionarios_data)
                 st.rerun()
 
 else:
-    # --- 🔥 ETAPA 1: VISÃO DA TI COM TELA DE LOGIN SEGURA ---
+    # --- VISÃO DA TI COM TELA DE LOGIN SEGURA ---
     st.markdown("<h1 style='text-align: center; color: #0f172a;'>🏢 Gestão de Integração Ferpam</h1>", unsafe_allow_html=True)
     
-    # Gerencia o estado do login
     if "autenticado" not in st.session_state:
         st.session_state["autenticado"] = False
 
@@ -293,7 +311,6 @@ else:
         senha_input = st.text_input("Senha", type="password")
         
         if st.button("Entrar no Painel", use_container_width=True, type="primary"):
-            # Compara com as credenciais que você salvou no painel do Streamlit Secrets
             if usuario_input == st.secrets["credentials"]["usuario_ti"] and senha_input == st.secrets["credentials"]["senha_ti"]:
                 st.session_state["autenticado"] = True
                 st.rerun()
@@ -301,7 +318,6 @@ else:
                 st.error("Usuário ou Senha inválidos.")
         st.markdown('</div>', unsafe_allow_html=True)
     else:
-        # Botão de sair do painel no topo direito
         st.sidebar.markdown(f"Logado como: **{st.secrets['credentials']['usuario_ti']}**")
         if st.sidebar.button("🚪 Sair do Painel"):
             st.session_state["autenticado"] = False
@@ -332,7 +348,8 @@ else:
                     
                     novo_funcionario = {
                         "id": funcionario_id, "nome": nome_cad, "cargo": cargo_cad, "setor": setor_envio,
-                        "email": email_cad, "assinado": False, "assinatura_hex": None, "data_hora": "", "pdf_hex": None
+                        "email": email_cad, "assinado": False, "assinatura_hex": None, "data_hora": "",
+                        "ip_auditoria": "", "ua_auditoria": ""
                     }
                     
                     enviado, motivo_erro = enviar_email(email_cad, nome_cad, link_unico)
@@ -380,10 +397,17 @@ else:
                     with col_botoes:
                         sub_col1, sub_col2 = st.columns(2)
                         with sub_col1:
-                            if f.get("pdf_hex"):
+                            # 🔥 SEGURANÇA MÁXIMA: O PDF não fica no JSON. Ele é gerado em tempo real aqui
+                            # Apenas o administrador autenticado consegue acionar essa geração
+                            if f.get("assinatura_hex"):
+                                sig_bytes = bytes.fromhex(f["assinatura_hex"])
+                                pdf_sob_demanda = gerar_pdf_contrato(
+                                    f["nome"], f["cargo"], f["setor"], f["data_hora"], 
+                                    sig_bytes, f["id"], f.get("ip_auditoria", "Não registrado"), f.get("ua_auditoria", "Não registrado")
+                                )
                                 st.download_button(
                                     "📥 Baixar PDF", 
-                                    bytes.fromhex(f["pdf_hex"]), 
+                                    pdf_sob_demanda, 
                                     file_name=f"Termo_TI_{f['nome'].replace(' ', '_')}.pdf", 
                                     mime="application/pdf", 
                                     key=f"down_{f['id']}"
