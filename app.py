@@ -366,11 +366,16 @@ else:
                     
                     enviado, motivo_erro = enviar_email(email_cad, nome_cad, link_unico)
                     
-                    if enviado:
-                        supabase.table("funcionarios").insert(novo_funcionario).execute()
-                        st.success(f"✅ {nome_cad} cadastrado e e-mail enviado com sucesso!")
-                    else:
-                        st.error(f"❌ Falha crítica ao enviar e-mail: {motivo_erro}")
+                if enviado:
+    try:
+        # Tenta inserir no banco de dados
+        supabase.table("funcionarios").insert(novo_funcionario).execute()
+        st.success(f"✅ {nome_cad} cadastrado e e-mail enviado com sucesso!")
+    except Exception as erro_banco:
+        # Captura o erro real do Supabase e mostra na tela sem travar o app
+        st.error(f"❌ Erro ao gravar no Supabase: {erro_banco}")
+else:
+    st.error(f"❌ Falha crítica ao enviar e-mail: {motivo_erro}")
                 else:
                     st.error("Por favor, preencha os campos obrigatórios.")
 
