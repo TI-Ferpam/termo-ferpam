@@ -316,14 +316,14 @@ else:
             else:
                 st.error("Por favor, preencha os campos obrigatórios.")
 
-    # --- ABA 2: ARQUIVO ---
+  # --- ABA 2: ARQUIVO ---
     with tab_arquivo:
         st.markdown("### 📂 Contratos Concluídos")
         funcionarios_data = carregar_funcionarios()
         assinados = [f for f in funcionarios_data if f["assinado"]]
         pendentes_lista = [f for f in funcionarios_data if not f["assinado"]]
         
-       if not pendentes_lista:
+        if not pendentes_lista:
             st.caption("Não há assinaturas pendentes no momento.")
         else:
             st.markdown(f"**Pendentes de Assinatura ({len(pendentes_lista)}):**")
