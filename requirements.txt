@@ -1,8 +1,9 @@
 streamlit
 streamlit-drawable-canvas
-fpdf2
+fpdf
 pillow
 pytz
+streamlit-javascript
+supabase==2.4.1
+httpx==0.27.2
 numpy
-streamlit-javascript==0.1.5
-supabase==2.4.0
