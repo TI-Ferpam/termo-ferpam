@@ -3,6 +3,7 @@ import streamlit.components.v1 as components
 import uuid
 import datetime
 import pytz
+import os  # <-- Adicionado para evitar erro na deleção do arquivo temporário do PDF
 from io import BytesIO
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
@@ -11,6 +12,17 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from streamlit_javascript import st_javascript
+
+# 🔥 INTERCEPTAÇÃO E CORREÇÃO DE COMPATIBILIDADE HTTP2 (MATA O BUG DO TYPEERROR)
+import httpx
+original_init = httpx.SyncClient.__init__
+
+def patched_init(self, *args, **kwargs):
+    if "http2" in kwargs:
+        kwargs["http2"] = False  # Desativa o HTTP2 que causa a quebra no servidor
+    original_init(self, *args, **kwargs)
+
+httpx.SyncClient.__init__ = patched_init
 
 # 🔥 IMPORTAÇÃO DO BANCO DE DADOS CLIENTE DO SUPABASE
 from supabase import create_client, Client
@@ -54,18 +66,12 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# 🔥 INICIALIZAÇÃO DA CONEXÃO DO SUPABASE COM TRAVA DE COMPATIBILIDADE PARA PYTHON 3.14+
-from supabase.client import ClientOptions
-
+# 🔥 INICIALIZAÇÃO DA CONEXÃO DO SUPABASE
 @st.cache_resource
 def iniciar_banco() -> Client:
     url = st.secrets["supabase"]["url"]
     key = st.secrets["supabase"]["key"]
-    
-    # Remove a extensão HTTP2 que causa quebra nas versões novas do Python
-    opcoes = ClientOptions(postgrest_client_timeout=10, storage_client_timeout=10)
-    
-    return create_client(url, key, options=opcoes)
+    return create_client(url, key)
 
 supabase = iniciar_banco()
 
@@ -135,7 +141,7 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
         pdf.ln(1)
 
     pdf.ln(2)
-    pdf.multi_cell(0, 5, "Declaro estar ciente das orientações acima e comprometo-me a cumprir as normas de utilização dos recursos de Tecnologia da Informação disponibilizados pela Ferpam.\n")
+    pdf.multi_cell(0, 5, "Declaro estar ciente das orientações acima e comprometo-me a cumpir as normas de utilização dos recursos de Tecnologia da Informação disponibilizados pela Ferpam.\n")
     pdf.ln(4)
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(4)
@@ -202,7 +208,7 @@ Equipe de TI - Ferpam"""
         servidor = smtplib.SMTP("smtp.gmail.com", 587)
         servidor.starttls()
         servidor.login(EMAIL, SENHA)
-        servidor.sendmail(EMAIL, destinatario, mensagem.as_string())
+        servidor.sendmail(EMAIL, destinatario, message=mensagem.as_string())
         servidor.quit()
         return True, "Sucesso"
     except Exception as erro:
@@ -214,7 +220,6 @@ url_id = st.query_params.get("id", None)
 
 if url_id:
     # --- VISÃO DO COLABORADOR ---
-    # 🔥 Lendo o colaborador em tempo real direto da API do Supabase filtrando por ID
     resposta = supabase.table("funcionarios").select("*").eq("id", url_id).execute()
     colaborador = resposta.data[0] if len(resposta.data) > 0 else None
     
@@ -285,7 +290,6 @@ if url_id:
                 fuso_brasilia = pytz.timezone("America/Sao_Paulo")
                 data_atual = datetime.datetime.now(fuso_brasilia).strftime("%d/%m/%Y às %H:%M:%S")
 
-                # 🔥 ATUALIZAÇÃO SEGURA DIRETAMENTE NA TABELA DO SUPABASE FILTRANDO PELO ID
                 supabase.table("funcionarios").update({
                     "assinado": True,
                     "assinatura_hex": img_bytes.hex(),
@@ -353,7 +357,6 @@ else:
                     enviado, motivo_erro = enviar_email(email_cad, nome_cad, link_unico)
                     
                     if enviado:
-                        # 🔥 INSERINDO O NOVO COLABORADOR DIRECTAMENTE NO BANCO SUPABASE
                         supabase.table("funcionarios").insert(novo_funcionario).execute()
                         st.success(f"✅ {nome_cad} cadastrado e e-mail enviado com sucesso!")
                     else:
@@ -365,7 +368,6 @@ else:
         with tab_arquivo:
             st.markdown("### 📂 Contratos Concluídos")
             
-            # 🔥 Lendo todos os dados do banco Supabase ordenados por nome para a TI acompanhar
             resposta_todos = supabase.table("funcionarios").select("*").order("nome").execute()
             todos_funcionarios = resposta_todos.data
             
@@ -382,7 +384,6 @@ else:
                         st.caption(f"⏳ {p['nome']} ({p['email']}) - ID: {p['id']}")
                     with col_pend2:
                         if st.button("❌", key=f"del_pend_{p['id']}", help="Cancelar envio/Excluir pendente"):
-                            # 🔥 DELETANDO O PENDENTE DIRETO NO SUPABASE
                             supabase.table("funcionarios").delete().eq("id", p["id"]).execute()
                             st.rerun()
 
@@ -414,7 +415,6 @@ else:
                                 )
                         with sub_col2:
                             if st.button("❌ Deletar", key=f"del_{f['id']}", type="secondary"):
-                                # 🔥 DELETANDO O ASSINADO DIRETO NO SUPABASE
                                 supabase.table("funcionarios").delete().eq("id", f["id"]).execute()
                                 st.toast(f"Registro de {f['nome']} removido com sucesso!")
                                 st.rerun()
