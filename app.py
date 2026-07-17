@@ -323,12 +323,19 @@ else:
         assinados = [f for f in funcionarios_data if f["assinado"]]
         pendentes_lista = [f for f in funcionarios_data if not f["assinado"]]
         
-        if not pendentes_lista:
+       if not pendentes_lista:
             st.caption("Não há assinaturas pendentes no momento.")
         else:
             st.markdown(f"**Pendentes de Assinatura ({len(pendentes_lista)}):**")
             for p in pendentes_lista:
-                st.caption(f"⏳ {p['nome']} ({p['email']}) - ID: {p['id']}")
+                col_pend1, col_pend2 = st.columns([4, 1])
+                with col_pend1:
+                    st.caption(f"⏳ {p['nome']} ({p['email']}) - ID: {p['id']}")
+                with col_pend2:
+                    if st.button("❌", key=f"del_pend_{p['id']}", help="Cancelar envio/Excluir pendente"):
+                        funcionarios_data = [func for func in funcionarios_data if func["id"] != p["id"]]
+                        salvar_funcionarios(funcionarios_data)
+                        st.rerun()
 
         st.divider()
 
