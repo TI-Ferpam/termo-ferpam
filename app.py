@@ -13,16 +13,26 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from streamlit_javascript import st_javascript
 
-# 🔥 INTERCEPTAÇÃO E CORREÇÃO DE COMPATIBILIDADE HTTP2 (MATA O BUG DO TYPEERROR)
+# 🔥 INTERCEPTAÇÃO E CORREÇÃO DE COMPATIBILIDADE HTTP2 (MATA O BUG DO TYPEERROR & ATTRIBUTEERROR)
 import httpx
-original_init = httpx.SyncClient.__init__
 
-def patched_init(self, *args, **kwargs):
-    if "http2" in kwargs:
-        kwargs["http2"] = False  # Desativa o HTTP2 que causa a quebra no servidor
-    original_init(self, *args, **kwargs)
+# Verifica qual o nome correto da classe na versão instalada do httpx
+if hasattr(httpx, "Client"):
+    TargetClient = httpx.Client
+elif hasattr(httpx, "SyncClient"):
+    TargetClient = httpx.SyncClient
+else:
+    TargetClient = None
 
-httpx.SyncClient.__init__ = patched_init
+if TargetClient:
+    original_init = TargetClient.__init__
+
+    def patched_init(self, *args, **kwargs):
+        if "http2" in kwargs:
+            kwargs["http2"] = False  # Desativa o HTTP2 que quebra o Python no Streamlit Cloud
+        original_init(self, *args, **kwargs)
+
+    TargetClient.__init__ = patched_init
 
 # 🔥 IMPORTAÇÃO DO BANCO DE DADOS CLIENTE DO SUPABASE
 from supabase import create_client, Client
