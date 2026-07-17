@@ -2,9 +2,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 import uuid
 import datetime
-import json
 import pytz
-import os
 from io import BytesIO
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
@@ -13,6 +11,9 @@ import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from streamlit_javascript import st_javascript
+
+# 🔥 IMPORTAÇÃO DO BANCO DE DADOS CLIENTE DO SUPABASE
+from supabase import create_client, Client
 
 # Configurações de layout
 st.set_page_config(page_title="Portal de Assinaturas - Ferpam", page_icon="🏢", layout="centered")
@@ -52,35 +53,27 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# BANCO DE DADOS JSON
-DB_FILE = "funcionarios_db.json"
 
-def carregar_funcionarios():
-    if not os.path.exists(DB_FILE):
-        return []
-    try:
-        with open(DB_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return []
+# 🔥 INICIALIZAÇÃO DA CONEXÃO DO SUPABASE USANDO OS SECRETS
+@st.cache_resource
+def iniciar_banco() -> Client:
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
 
-def salvar_funcionarios(lista):
-    try:
-        with open(DB_FILE, "w", encoding="utf-8") as f:
-            json.dump(lista, f, ensure_ascii=False, indent=4)
-    except Exception as e:
-        st.error(f"Erro ao salvar dados no banco: {e}")
+supabase = iniciar_banco()
+
 
 def renderizar_termo_tela():
     html_conteudo = """<div class="termo-doc">
 <h3 style="text-align:center; margin-top:0; margin-bottom:20px; color: #0f172a;">TERMO DE RESPONSABILIDADE E USO DOS RECURSOS DE TI</h3>
 <p>Este Termo tem como objetivo estabelecer as diretrizes para o uso adequado dos recursos de Tecnologia da Informação disponibilizados pela Ferpam, garantindo a segurança, a integridade e a confidencialidade das informações da empresa.</p>
 <p>Ao receber acesso aos sistemas, equipamentos e recursos tecnológicos da Ferpam, o colaborador declara estar ciente e concorda com as seguintes responsabilidades:</p>
-<p><b>1. Confidencialidade das Informações</b><br>Todas as informações acessadas durante as atividades profissionais são de uso exclusivo da Ferpam e não devem ser divulgadas, compartilhadas ou utilizadas para fins pessoais ou externos sem autorização.</p>
+<p><b>1. Confidencialidade das Informações</b><br>Todas as informações acessadas durante as atividades profissionais são de uso exclusive da Ferpam e não devem ser divulgadas, compartilhadas ou utilizadas para fins pessoais ou externos sem autorização.</p>
 <p><b>2. Instalação de Programas e Equipamentos</b><br>A instalação de programas, aplicativos, extensões, equipamentos ou qualquer alteração nos computadores e dispositivos da empresa deve ser realizada exclusivamente pelo setor de TI. Não é permitido instalar softwares ou aplicativos por conta própria.</p>
 <p><b>3. Uso de E-mails e Dispositivos Pessoais</b><br>O uso de e-mails pessoais, pendrives, cartões de memória, serviços de armazenamento em nuvem e aplicativos de comunicação para manipulação de informações da empresa deve ocorrer apenas quando autorizado pela gestão ou pelo setor de TI.</p>
 <p><b>4. Uso da Internet</b><br>O acesso à internet disponibilizado pela empresa deve ser utilizado prioritariamente para atividades relacionadas ao trabalho. O acesso a conteúdos inadequados, ilegais ou que possam comprometer a segurança da empresa é proibido.</p>
-<p><b>5. Senhas de Acesso</b><br>As senhas fornecidas para acesso aos sistemas são pessoais e intransferíveis. Não é permitido compartilhar senhas com outros colaboradores ou terceiros.</p>
+<p><b>5. Senhas de Acesso</b><br>Las senhas fornecidas para acesso aos sistemas são pessoais e intransferíveis. Não é permitido compartilhar senhas com outros colaboradores ou terceiros.</p>
 <p><b>6. Segurança das Senhas</b><br>O colaborador compromete-se a:<br>
 - Não anotar senhas em locais visíveis;<br>
 - Não salvar senhas em arquivos desprotegidos;<br>
@@ -97,7 +90,7 @@ def renderizar_termo_tela():
 </div>"""
     st.markdown(html_conteudo, unsafe_allow_html=True)
 
-# 🔥 DICA DE OURO: Função agora gera o PDF aplicando os metadados de auditoria e segurança jurídica
+
 def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funcionario_id, ip_cliente="Não capturado", ua_cliente="Não capturado"):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
@@ -108,7 +101,7 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
     pdf.set_font("Arial", "", 10.5)
     
     intro = (
-        "Este Termo tem como objetivo estabelecer as diretrizes para o uso adequado dos recursos de "
+        "Este Termo tem como objetivo estabelecer las diretrizes para o uso adequado dos recursos de "
         "Tecnologia da Informação disponibilizados pela Ferpam, garantindo a segurança, a integridade "
         "e a confidencialidade das informações da empresa.\n\n"
         "Ao receber acesso aos sistemas, equipamentos e recursos tecnológicos da Ferpam, o colaborador "
@@ -154,12 +147,11 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
         pdf.ln(3)
         pdf.cell(0, 6, "Assinatura Digitalizada:", ln=True)
         pdf.image(assinatura_temp, x=20, y=pdf.get_y(), w=65)
-        pdf.ln(25) # Espaço para não encavalar o bloco de metadados abaixo da imagem
+        pdf.ln(25)
     finally:
         if os.path.exists(assinatura_temp):
             os.remove(assinatura_temp)
 
-    # Bloco de Evidências Digitais (Auditoria Técnica)
     pdf.set_font("Arial", "I", 8)
     pdf.set_text_color(100, 116, 139)
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
@@ -175,6 +167,7 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
     elif isinstance(pdf_bytes, bytearray):
         pdf_bytes = bytes(pdf_bytes)
     return pdf_bytes
+
 
 def enviar_email(destinatario, nome, link):
     EMAIL = "suporte.ti@ferpam.com.br"
@@ -211,12 +204,13 @@ Equipe de TI - Ferpam"""
 
 
 # ---------------- LOGICA DE ROTEAMENTO ----------------
-funcionarios_data = carregar_funcionarios()
 url_id = st.query_params.get("id", None)
 
 if url_id:
     # --- VISÃO DO COLABORADOR ---
-    colaborador = next((f for f in funcionarios_data if f["id"] == url_id), None)
+    # 🔥 Lendo o colaborador em tempo real direto da API do Supabase filtrando por ID
+    resposta = supabase.table("funcionarios").select("*").eq("id", url_id).execute()
+    colaborador = resposta.data[0] if len(resposta.data) > 0 else None
     
     if not colaborador:
         st.error("⚠️ Link de assinatura inválido ou expirado. Entre em contato com o setor de TI.")
@@ -259,7 +253,6 @@ if url_id:
         </script>
         """, height=0, width=0)
 
-       # Captura dados de rede do cliente via chamadas Javascript assíncronas em tela
         ip_capturado = st_javascript("fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => d.ip)")
         ua_capturado = st_javascript("window.navigator.userAgent")
 
@@ -271,7 +264,6 @@ if url_id:
             if not tem_desenho:
                 st.error("O quadro de assinatura está vazio. Por favor, faça sua assinatura antes de clicar em enviar.")
             else:
-                # Garante que se o JS atrasar, não salve "None" ou "False"
                 ip_final = str(ip_capturado) if (ip_capturado and ip_capturado != "False") else "IP Não identificado"
                 ua_final = str(ua_capturado) if (ua_capturado and ua_capturado != "False") else "Dispositivo Desconhecido"
 
@@ -284,20 +276,18 @@ if url_id:
                 img_final.save(buffered, format="PNG")
                 img_bytes = buffered.getvalue()
 
-                # 🔥 CORREÇÃO DA HORA: Forçando o fuso horário de Brasília (GMT-3)
                 fuso_brasilia = pytz.timezone("America/Sao_Paulo")
                 data_atual = datetime.datetime.now(fuso_brasilia).strftime("%d/%m/%Y às %H:%M:%S")
 
-                for f in funcionarios_data:
-                    if f["id"] == colaborador["id"]:
-                        f["assinado"] = True
-                        f["assinatura_hex"] = img_bytes.hex()
-                        f["data_hora"] = data_atual
-                        f["ip_auditoria"] = ip_final
-                        f["ua_auditoria"] = ua_final
-                        break
+                # 🔥 ATUALIZAÇÃO SEGURA DIRETAMENTE NA TABELA DO SUPABASE FILTRANDO PELO ID
+                supabase.table("funcionarios").update({
+                    "assinado": True,
+                    "assinatura_hex": img_bytes.hex(),
+                    "data_hora": data_atual,
+                    "ip_auditoria": ip_final,
+                    "ua_auditoria": ua_final
+                }).eq("id", colaborador["id"]).execute()
 
-                salvar_funcionarios(funcionarios_data)
                 st.rerun()
 else:
     # --- VISÃO DA TI COM TELA DE LOGIN SEGURA ---
@@ -357,8 +347,8 @@ else:
                     enviado, motivo_erro = enviar_email(email_cad, nome_cad, link_unico)
                     
                     if enviado:
-                        funcionarios_data.append(novo_funcionario)
-                        salvar_funcionarios(funcionarios_data)
+                        # 🔥 INSERINDO O NOVO COLABORADOR DIRECTAMENTE NO BANCO SUPABASE
+                        supabase.table("funcionarios").insert(novo_funcionario).execute()
                         st.success(f"✅ {nome_cad} cadastrado e e-mail enviado com sucesso!")
                     else:
                         st.error(f"❌ Falha crítica ao enviar e-mail: {motivo_erro}")
@@ -368,9 +358,13 @@ else:
         # --- ABA 2: ARQUIVO ---
         with tab_arquivo:
             st.markdown("### 📂 Contratos Concluídos")
-            funcionarios_data = carregar_funcionarios()
-            assinados = [f for f in funcionarios_data if f["assinado"]]
-            pendentes_lista = [f for f in funcionarios_data if not f["assinado"]]
+            
+            # 🔥 Lendo todos os dados do banco Supabase ordenados por nome para a TI acompanhar
+            resposta_todos = supabase.table("funcionarios").select("*").order("nome").execute()
+            todos_funcionarios = resposta_todos.data
+            
+            assinados = [f for f in todos_funcionarios if f["assinado"]]
+            pendentes_lista = [f for f in todos_funcionarios if not f["assinado"]]
             
             if not pendentes_lista:
                 st.caption("Não há assinaturas pendentes no momento.")
@@ -382,8 +376,8 @@ else:
                         st.caption(f"⏳ {p['nome']} ({p['email']}) - ID: {p['id']}")
                     with col_pend2:
                         if st.button("❌", key=f"del_pend_{p['id']}", help="Cancelar envio/Excluir pendente"):
-                            funcionarios_data = [func for func in funcionarios_data if func["id"] != p["id"]]
-                            salvar_funcionarios(funcionarios_data)
+                            # 🔥 DELETANDO O PENDENTE DIRETO NO SUPABASE
+                            supabase.table("funcionarios").delete().eq("id", p["id"]).execute()
                             st.rerun()
 
             st.divider()
@@ -399,8 +393,6 @@ else:
                     with col_botoes:
                         sub_col1, sub_col2 = st.columns(2)
                         with sub_col1:
-                            # 🔥 SEGURANÇA MÁXIMA: O PDF não fica no JSON. Ele é gerado em tempo real aqui
-                            # Apenas o administrador autenticado consegue acionar essa geração
                             if f.get("assinatura_hex"):
                                 sig_bytes = bytes.fromhex(f["assinatura_hex"])
                                 pdf_sob_demanda = gerar_pdf_contrato(
@@ -416,8 +408,8 @@ else:
                                 )
                         with sub_col2:
                             if st.button("❌ Deletar", key=f"del_{f['id']}", type="secondary"):
-                                funcionarios_data = [func for func in funcionarios_data if func["id"] != f["id"]]
-                                salvar_funcionarios(funcionarios_data)
+                                # 🔥 DELETANDO O ASSINADO DIRETO NO SUPABASE
+                                supabase.table("funcionarios").delete().eq("id", f["id"]).execute()
                                 st.toast(f"Registro de {f['nome']} removido com sucesso!")
                                 st.rerun()
                     st.divider()
