@@ -218,7 +218,8 @@ Equipe de TI - Ferpam"""
         servidor = smtplib.SMTP("smtp.gmail.com", 587)
         servidor.starttls()
         servidor.login(EMAIL, SENHA)
-        servidor.sendmail(EMAIL, destinatario, message=mensagem.as_string())
+        # CORREÇÃO: Alterado de message= para msg=
+        servidor.sendmail(EMAIL, destinatario, msg=mensagem.as_string())
         servidor.quit()
         return True, "Sucesso"
     except Exception as erro:
