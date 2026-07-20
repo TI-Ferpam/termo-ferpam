@@ -342,6 +342,7 @@ else:
         ])
 
         # --- ABA 1: CADASTRO (MODIFICADA) ---
+      # --- ABA 1: CADASTRO (CORRIGIDA) ---
         with tab_cadastro:
             st.markdown("### 📝 Dados do Novo Colaborador")
             col_a, col_b = st.columns(2)
@@ -358,10 +359,11 @@ else:
                     funcionario_id = str(uuid.uuid4())[:8]
                     setor_envio = setor_cad if setor_cad else "Geral"
                     
+                    # CORREÇÃO: "email_enviado" removido para espelhar perfeitamente suas colunas do banco
                     novo_funcionario = {
                         "id": funcionario_id, "nome": nome_cad, "cargo": cargo_cad, "setor": setor_envio,
                         "email": email_cad, "assinado": False, "assinatura_hex": None, "data_hora": "",
-                        "ip_auditoria": "", "ua_auditoria": "", "email_enviado": False # Nova flag de controle interno
+                        "ip_auditoria": "", "ua_auditoria": ""
                     }
                     
                     try:
