@@ -218,7 +218,7 @@ Equipe de TI - Ferpam"""
         servidor = smtplib.SMTP("smtp.gmail.com", 587)
         servidor.starttls()
         servidor.login(EMAIL, SENHA)
-        servidor.sendmail(EMAIL, destinatario, mensagem.as_string())
+        servidor.sendmail(EMAIL, destinatario, message=mensagem.as_string())
         servidor.quit()
         return True, "Sucesso"
     except Exception as erro:
@@ -341,8 +341,7 @@ else:
             "📂 Arquivo de Contratos"
         ])
 
-        # --- ABA 1: CADASTRO ---
-       # --- ABA 1: CADASTRO ---
+        # --- ABA 1: CADASTRO (MODIFICADA) ---
         with tab_cadastro:
             st.markdown("### 📝 Dados do Novo Colaborador")
             col_a, col_b = st.columns(2)
@@ -353,32 +352,52 @@ else:
                 email_cad = st.text_input("E-mail", placeholder="Ex: joao@ferpam.com.br", key="cad_email")
                 setor_cad = st.text_input("Setor", placeholder="Ex: TI", key="cad_setor")
 
-            if st.button("✨ Cadastrar para Assinatura", use_container_width=True):
+            # Agora o botão inicial APENAS salva no banco
+            if st.button("✨ Salvar e Gerar Link de Assinatura", use_container_width=True, type="primary"):
                 if nome_cad and cargo_cad and email_cad:
                     funcionario_id = str(uuid.uuid4())[:8]
-                    link_unico = f"https://termo-ferpam.streamlit.app/?id={funcionario_id}"
                     setor_envio = setor_cad if setor_cad else "Geral"
                     
                     novo_funcionario = {
                         "id": funcionario_id, "nome": nome_cad, "cargo": cargo_cad, "setor": setor_envio,
                         "email": email_cad, "assinado": False, "assinatura_hex": None, "data_hora": "",
-                        "ip_auditoria": "", "ua_auditoria": ""
+                        "ip_auditoria": "", "ua_auditoria": "", "email_enviado": False # Nova flag de controle interno
                     }
                     
-                    enviado, motivo_erro = enviar_email(email_cad, nome_cad, link_unico)
-                    
-                    if enviado:
-                        try:
-                            # Tenta inserir no banco de dados
-                            supabase.table("funcionarios").insert(novo_funcionario).execute()
-                            st.success(f"✅ {nome_cad} cadastrado e e-mail enviado com sucesso!")
-                        except Exception as erro_banco:
-                            # Captura o erro real do Supabase e mostra na tela sem travar o app
-                            st.error(f"❌ Erro ao gravar no Supabase: {erro_banco}")
-                    else:
-                        st.error(f"❌ Falha crítica ao enviar e-mail: {motivo_erro}")
+                    try:
+                        supabase.table("funcionarios").insert(novo_funcionario).execute()
+                        st.success(f"✅ {nome_cad} cadastrado com sucesso! Envie o e-mail na lista abaixo quando desejar.")
+                    except Exception as erro_banco:
+                        st.error(f"❌ Erro ao gravar no Supabase: {erro_banco}")
                 else:
                     st.error("Por favor, preencha os campos obrigatórios.")
+            
+            st.divider()
+            
+            # Seção para disparar e-mails manualmente
+            st.markdown("### ✉️ Disparo Manual de Links")
+            resposta_pendentes = supabase.table("funcionarios").select("*").eq("assinado", False).order("nome").execute()
+            pendentes_email = resposta_pendentes.data
+
+            if not pendentes_email:
+                st.caption("Nenhum colaborador aguardando envio de link no momento.")
+            else:
+                for p in pendentes_email:
+                    c1, c2 = st.columns([3, 1])
+                    link_unico = f"https://termo-ferpam.streamlit.app/?id={p['id']}"
+                    
+                    with c1:
+                        st.markdown(f"**{p['nome']}** ({p['email']})")
+                        st.caption(f"Cargo: {p['cargo']} | Link: `{link_unico}`")
+                    with c2:
+                        # Botão que efetivamente envia o e-mail quando você clica
+                        if st.button("🚀 Enviar E-mail", key=f"env_mail_{p['id']}", use_container_width=True):
+                            enviado, motivo_erro = enviar_email(p["email"], p["nome"], link_unico)
+                            if enviado:
+                                st.toast(f"E-mail enviado para {p['nome']}!")
+                            else:
+                                st.error(f"Erro ao enviar: {motivo_erro}")
+
         # --- ABA 2: ARQUIVO ---
         with tab_arquivo:
             st.markdown("### 📂 Contratos Concluídos")
@@ -431,6 +450,6 @@ else:
                         with sub_col2:
                             if st.button("❌ Deletar", key=f"del_{f['id']}", type="secondary"):
                                 supabase.table("funcionarios").delete().eq("id", f["id"]).execute()
-                                st.toast(f"Registro de {f['nome']} removido com sucesso!")
+                                st.toast(f"Registro de {f['nome']} removed com sucesso!")
                                 st.rerun()
                     st.divider()
