@@ -123,7 +123,7 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
     pdf.set_font("Arial", "", 10.5)
     
     intro = (
-        "Este Termo tem como objetivo estabelecer las diretrizes para o uso adequado dos recursos de "
+        "Este Termo tem como objetivo estabelecer as diretrizes para o uso adequado dos recursos de "
         "Tecnologia da Informação disponibilizados pela Ferpam, garantindo a segurança, a integridade "
         "e a confidencialidade das informações da empresa.\n\n"
         "Ao receber acesso aos sistemas, equipamentos e recursos tecnológicos da Ferpam, o colaborador "
