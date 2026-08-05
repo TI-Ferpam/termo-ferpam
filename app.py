@@ -560,7 +560,7 @@ if st.session_state.tela == "dashboard":
 
         st.divider()
 
-        # --- CÁLCULO E DETALHAMENTO DE STATUS "EM ANDAMENTO" ---
+    # --- CÁLCULO E DETALHAMENTO DE STATUS "EM ANDAMENTO" ---
         df_dash = df_op_base.copy()
         df_dash["grupo_status"] = df_dash["status"].apply(classificar_status_grupo)
 
@@ -570,52 +570,59 @@ if st.session_state.tela == "dashboard":
         pendentes = len(df_dash[df_dash["grupo_status"] == "Abertos"])
         taxa_conclusao = (concluidos / total_chamados * 100) if total_chamados > 0 else 0
 
-        # Mapeia quais são os status específicos dentro de "Em Andamento" e suas quantidades
-        df_andamento_detalhes = (
-            df_dash[df_dash["grupo_status"] == "Em Andamento"]["status"]
-            .replace("", "Em Atendimento")
-            .value_counts()
-        )
+        # Filtra os chamados em andamento e pega a contagem real de cada status
+        df_andamento_only = df_dash[df_dash["grupo_status"] == "Em Andamento"]
+        detalhe_status_andamento = df_andamento_only["status"].replace("", "Em Atendimento").value_counts()
 
+        # --- CARDS / METRICS DA OPERAÇÃO ---
         m1, m2, m3, m4, m5 = st.columns(5)
+
         with m1:
             st.metric("Total Chamados", total_chamados)
             if st.button("👁️ Ver Todos", key="btn_kpi_total", use_container_width=True):
                 limpar_filtro_dash()
                 st.rerun()
+
         with m2:
             st.metric("🟢 Concluídos", concluidos)
             if st.button("🔍 Concluídos", key="btn_kpi_concluidos", use_container_width=True, type=("primary" if st.session_state.filtro_dash_valor == "Concluídos" else "secondary")):
                 st.session_state.filtro_dash_tipo = "status_grupo"
                 st.session_state.filtro_dash_valor = "Concluídos"
                 st.rerun()
+
         with m3:
             st.metric("🔵 Em Andamento", em_andamento)
-            if st.button("🔍 Andamento", key="btn_kpi_andamento", use_container_width=True, type=("primary" if st.session_state.filtro_dash_valor == "Em Andamento" else "secondary")):
+            # Botão principal do card
+            if st.button("🔍 Ver Todos Em Andamento", key="btn_kpi_andamento", use_container_width=True, type=("primary" if st.session_state.filtro_dash_valor == "Em Andamento" else "secondary")):
                 st.session_state.filtro_dash_tipo = "status_grupo"
                 st.session_state.filtro_dash_valor = "Em Andamento"
                 st.rerun()
+
         with m4:
             st.metric("🟡 Abertos", pendentes)
             if st.button("🔍 Abertos", key="btn_kpi_abertos", use_container_width=True, type=("primary" if st.session_state.filtro_dash_valor == "Abertos" else "secondary")):
                 st.session_state.filtro_dash_tipo = "status_grupo"
                 st.session_state.filtro_dash_valor = "Abertos"
                 st.rerun()
+
         with m5:
             st.metric("📈 Taxa Resolução", f"{taxa_conclusao:.1f}%")
 
-        # --- BLOCO DE DETALHAMENTO DE STATUS "EM ANDAMENTO" ---
-        if not df_andamento_detalhes.empty:
-            with st.expander("📌 **Ver Detalhamento dos Chamados em Andamento**", expanded=True):
-                st.caption("Clique em qualquer um para filtrar diretamente na lista:")
-                cols_andamento = st.columns(min(len(df_andamento_detalhes), 5))
-                for i, (st_nome, st_qtd) in enumerate(df_andamento_detalhes.items()):
-                    col_idx = i % len(cols_andamento)
-                    with cols_andamento[col_idx]:
-                        if st.button(f"**{st_nome}**: {st_qtd}", key=f"btn_sub_status_{i}", use_container_width=True):
-                            st.session_state.filtro_dash_tipo = "status"
-                            st.session_state.filtro_dash_valor = st_nome
-                            st.rerun()
+        # --- PAINEL FIXO DE SUB-STATUS "EM ANDAMENTO" ---
+        st.markdown("#### 📂 Divisão dos Chamados Em Andamento por Status:")
+        if not detalhe_status_andamento.empty:
+            cols_sub = st.columns(min(len(detalhe_status_andamento), 6))
+            for i, (st_nome, st_qtd) in enumerate(detalhe_status_andamento.items()):
+                col_target = cols_sub[i % len(cols_sub)]
+                with col_target:
+                    is_active = (st.session_state.filtro_dash_tipo == "status" and st.session_state.filtro_dash_valor == st_nome)
+                    btn_type = "primary" if is_active else "secondary"
+                    if st.button(f"📌 {st_nome}\n\n**{st_qtd}**", key=f"btn_sub_st_{i}", use_container_width=True, type=btn_type):
+                        st.session_state.filtro_dash_tipo = "status"
+                        st.session_state.filtro_dash_valor = st_nome
+                        st.rerun()
+        else:
+            st.info("Nenhum chamado em andamento no momento.")
 
         st.divider()
 
