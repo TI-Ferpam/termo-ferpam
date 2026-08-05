@@ -1,458 +1,822 @@
+import pandas as pd
+import plotly.express as px
 import streamlit as st
-import streamlit.components.v1 as components
-import uuid
-import datetime
-import pytz
-import os  # <-- Adicionado para evitar erro na deleção do arquivo temporário do PDF
-from io import BytesIO
-from PIL import Image
-from streamlit_drawable_canvas import st_canvas
-from fpdf import FPDF
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from streamlit_javascript import st_javascript
+from services.sheets import carregar_chamados
 
-# 🔥 INTERCEPTAÇÃO E CORREÇÃO DE COMPATIBILIDADE HTTP2 (MATA O BUG DO TYPEERROR & ATTRIBUTEERROR)
-import httpx
+# ============================================================
+# CONFIGURAÇÃO DA PÁGINA
+# ============================================================
 
-# Verifica qual o nome correto da classe na versão instalada do httpx
-if hasattr(httpx, "Client"):
-    TargetClient = httpx.Client
-elif hasattr(httpx, "SyncClient"):
-    TargetClient = httpx.SyncClient
-else:
-    TargetClient = None
+st.set_page_config(
+    page_title="Portal de Chamados TI",
+    page_icon="🎫",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 
-if TargetClient:
-    original_init = TargetClient.__init__
+LIMITE_ROADMAP_MINUTOS = 6 * 24 * 60  
 
-    def patched_init(self, *args, **kwargs):
-        if "http2" in kwargs:
-            kwargs["http2"] = False  # Desativa o HTTP2 que quebra o Python no Streamlit Cloud
-        original_init(self, *args, **kwargs)
+MESES_DIC = {
+    1: "Janeiro", 2: "Fevereiro", 3: "Março", 4: "Abril",
+    5: "Maio", 6: "Junho", 7: "Julho", 8: "Agosto",
+    9: "Setembro", 10: "Outubro", 11: "Novembro", 12: "Dezembro"
+}
 
-    TargetClient.__init__ = patched_init
+# ============================================================
+# FUNÇÃO AUXILIAR DE FORMATAÇÃO DE TEMPO
+# ============================================================
 
-# 🔥 IMPORTAÇÃO DO BANCO DE DADOS CLIENTE DO SUPABASE
-from supabase import create_client, Client
-
-# Configurações de layout
-st.set_page_config(page_title="Portal de Assinaturas - Ferpam", page_icon="🏢", layout="centered")
-
-# CSS CUSTOMIZADO
-st.markdown("""
-    <style>
-    .main { background-color: #f8fafc; }
-    .termo-doc {
-        background-color: white; padding: 30px; border-radius: 8px;
-        border: 1px solid #cbd5e1; color: #334155; font-size: 14.5px;
-        line-height: 1.6; margin-bottom: 20px;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
-    }
-    .termo-doc p {
-        margin-top: 0px !important;
-        margin-bottom: 12px !important;
-        padding: 0px !important;
-    }
-    iframe[title="streamlit_drawable_canvas.st_canvas"] {
-        height: 250px !important;
-        min-height: 250px !important;
-        border: 2px solid #cbd5e1 !important;
-        border-radius: 8px !important;
-        background-color: #ffffff !important;
-        display: block !important;
-    }
-    .sucesso-box {
-        background-color: #f0fdf4; border: 1px solid #bbf7d0; color: #166534;
-        padding: 30px; border-radius: 8px; text-align: center; margin-top: 50px;
-    }
-    .login-box {
-        background-color: white; padding: 25px; border-radius: 8px;
-        border: 1px solid #cbd5e1; margin-top: 40px;
-        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05);
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-
-# 🔥 INICIALIZAÇÃO DA CONEXÃO DO SUPABASE
-@st.cache_resource
-def iniciar_banco() -> Client:
-    url = st.secrets["supabase"]["url"]
-    key = st.secrets["supabase"]["key"]
-    return create_client(url, key)
-
-supabase = iniciar_banco()
-
-
-def renderizar_termo_tela():
-    html_conteudo = """<div class="termo-doc">
-<h3 style="text-align:center; margin-top:0; margin-bottom:20px; color: #0f172a;">TERMO DE RESPONSABILIDADE E USO DOS RECURSOS DE TI</h3>
-<p>Este Termo tem como objetivo estabelecer as diretrizes para o uso adequado dos recursos de Tecnologia da Informação disponibilizados pela Ferpam, garantindo a segurança, a integridade e a confidencialidade das informações da empresa.</p>
-<p>Ao receber acesso aos sistemas, equipamentos e recursos tecnológicos da Ferpam, o colaborador declara estar ciente e concorda com as seguintes responsabilidades:</p>
-<p><b>1. Confidencialidade das Informações</b><br>Todas as informações acessadas durante as atividades profissionais são de uso exclusive da Ferpam e não devem ser divulgadas, compartilhadas ou utilizadas para fins pessoais ou externos sem autorização.</p>
-<p><b>2. Instalação de Programas e Equipamentos</b><br>A instalação de programas, aplicativos, extensões, equipamentos ou qualquer alteração nos computadores e dispositivos da empresa deve ser realizada exclusivamente pelo setor de TI. Não é permitido instalar softwares ou aplicativos por conta própria.</p>
-<p><b>3. Uso de E-mails e Dispositivos Pessoais</b><br>O uso de e-mails pessoais, pendrives, cartões de memória, serviços de armazenamento em nuvem e aplicativos de comunicação para manipulação de informações da empresa deve ocorrer apenas quando autorizado pela gestão ou pelo setor de TI.</p>
-<p><b>4. Uso da Internet</b><br>O acesso à internet disponibilizado pela empresa deve ser utilizado prioritariamente para atividades relacionadas ao trabalho. O acesso a conteúdos inadequados, ilegais ou que possam comprometer a segurança da empresa é proibido.</p>
-<p><b>5. Senhas de Acesso</b><br>Las senhas fornecidas para acesso aos sistemas são pessoais e intransferíveis. Não é permitido compartilhar senhas com outros colaboradores ou terceiros.</p>
-<p><b>6. Segurança das Senhas</b><br>O colaborador compromete-se a:<br>
-- Não anotar senhas em locais visíveis;<br>
-- Não salvar senhas em arquivos desprotegidos;<br>
-- Alterar a senha sempre que houver suspeita de comprometimento;<br>
-- Utilizar senhas seguras.</p>
-<p><b>7. E-mails Suspeitos</b><br>O colaborador não deve abrir links, anexos ou mensagens suspeitas recebidas por e-mail, WhatsApp ou outros meios de comunicação. Em caso de dúvida, o setor de TI deverá ser acionado antes de qualquer interação.</p>
-<p><b>8. Proteção dos Equipamentos</b><br>Sempre que se ausentar do local de trabalho, o colaborador deverá bloquear o computador ou encerrar a sessão para evitar acessos não autorizados.</p>
-<p><b>9. Uso dos Equipamentos da Empresa</b><br>Os equipamentos disponibilizados pela Ferpam destinam-se às atividades profissionais e devem ser utilizados de forma responsável e cuidadosa.</p>
-<p><b>10. Monitoramento</b><br>A Ferpam poderá realizar monitoramento dos recursos tecnológicos disponibilizados, incluindo acessos à internet, utilização dos sistemas corporativos e demais recursos de TI, visando garantir a segurança das informações e a continuidade das operações.</p>
-<p><b>11. Comunicação de Incidentes</b><br>Qualquer suspeita de vírus, golpe, tentativa de fraude, perda de equipamento ou incidente relacionado à segurança da informação deverá ser comunicada imediatamente ao setor de TI.</p>
-<p><b>12. Responsabilidade do Colaborador</b><br>O descumprimento das diretrizes estabelecidas neste termo poderá resultar em medidas administrativas, conforme as normas internas da empresa e a legislação vigente.</p>
-<hr style="border:0; border-top: 1px solid #cbd5e1; margin: 15px 0;">
-<p>Declaro estar ciente das orientações acima e comprometo-me a cumprir as normas de utilização dos recursos de Tecnologia da Informação disponibilizados pela Ferpam.</p>
-</div>"""
-    st.markdown(html_conteudo, unsafe_allow_html=True)
-
-
-def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funcionario_id, ip_cliente="Não capturado", ua_cliente="Não capturado"):
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-    pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "TERMO DE RESPONSABILIDADE E USO DOS RECURSOS DE TI", ln=True, align="C")
-    pdf.ln(5)
-    pdf.set_font("Arial", "", 10.5)
+def formatar_tempo(minutos):
+    if pd.isna(minutos) or minutos is None or minutos < 0:
+        return "N/A"
+    minutos = int(round(minutos))
+    dias = minutos // (24 * 60)
+    horas = (minutos % (24 * 60)) // 60
+    mins = minutos % 60
     
-    intro = (
-        "Este Termo tem como objetivo estabelecer as diretrizes para o uso adequado dos recursos de "
-        "Tecnologia da Informação disponibilizados pela Ferpam, garantindo a segurança, a integridade "
-        "e a confidencialidade das informações da empresa.\n\n"
-        "Ao receber acesso aos sistemas, equipamentos e recursos tecnológicos da Ferpam, o colaborador "
-        "declara estar ciente e concorda com as seguintes responsabilidades:\n\n"
-    )
-    pdf.multi_cell(0, 5, intro)
+    if dias > 0:
+        return f"{dias}d {horas}h {mins}m"
+    elif horas > 0:
+        return f"{horas}h {mins:02d}m"
+    else:
+        return f"{mins} min"
 
-    diretrizes = [
-        "1. Confidencialidade das Informações\nTodas as informações acessadas durante as atividades profissionais são de uso exclusivo da Ferpam e não devem ser divulgadas, compartilhadas ou utilizadas para fins pessoais ou externos sem autorização.\n",
-        "2. Instalação de Programas e Equipamentos\nA instalação de programas, aplicativos, extensões, equipamentos ou qualquer alteração nos computadores e dispositivos da empresa deve ser realizada exclusivamente pelo setor de TI. Não é permitido instalar softwares ou aplicativos por conta própria.\n",
-        "3. Uso de E-mails e Dispositivos Pessoais\nO uso de e-mails pessoais, pendrives, cartões de memória, serviços de armazenamento em nuvem e aplicativos de comunicação para manipulação de informações da empresa deve ocorrer apenas quando autorizado pela gestão ou pelo setor de TI.\n",
-        "4. Uso da Internet\nO acesso à internet disponibilizado pela empresa deve ser utilizado prioritariamente para atividades relacionadas ao trabalho. O acesso a conteúdos inadequados, ilegais ou que possam comprometer a segurança da empresa é proibido.\n",
-        "5. Senhas de Acesso\nAs senhas fornecidas para acesso aos sistemas são pessoais e intransferíveis. Não é permitido compartilhar senhas com outros colaboradores ou terceiros.\n",
-        "6. Segurança das Senhas\nO colaborador compromete-se a:\n- Não anotar senhas em locais visíveis;\n- Não salvar senhas em arquivos desprotegidos;\n- Alterar a senha sempre que houver suspeita de comprometimento;\n- Utilizar senhas seguras.\n",
-        "7. E-mails Suspeitos\nO colaborador não deve abrir links, anexos ou mensagens suspeitas recebidas por e-mail, WhatsApp ou outros meios de comunicação. Em caso de dúvida, o setor de TI deverá ser acionado antes de qualquer interação.\n",
-        "8. Proteção dos Equipamentos\nSempre que se ausentar do local de trabalho, o colaborador deverá bloquear o computador ou encerrar a sessão para evitar acessos não autorizados.\n",
-        "9. Uso dos Equipamentos da Empresa\nOs equipamentos disponibilizados pela Ferpam destinam-se às atividades profissionais e devem ser utilizados de forma responsável e cuidadosa.\n",
-        "10. Monitoramento\nA Ferpam poderá realizar monitoramento dos recursos tecnológicos disponibilizados, incluindo acessos à internet, utilização dos sistemas corporativos e demais recursos de TI, visando garantir a segurança das informações e a continuidade das operações.\n",
-        "11. Comunicação de Incidentes\nQualquer suspeita de vírus, golpe, tentativa de fraude, perda de equipamento ou incidente relacionado à segurança da informação deverá ser comunicada imediatamente ao setor de TI.\n",
-        "12. Responsabilidade do Colaborador\nO descumprimento das diretrizes estabelecidas neste termo poderá resultar em medidas administrativas, conforme as normas internas da empresa e a legislação vigente.\n"
+# ============================================================
+# CARREGAMENTO E TRATAMENTO DE DADOS
+# ============================================================
+
+@st.cache_data(ttl=60)
+def carregar_dados():
+    colunas_obrigatorias = [
+        "id_chamado", "solicitante", "titulo", "ocorrencia", "status",
+        "prioridade", "departamento", "tecnico", "cidade",
+        "atividade_realizada", "nota_atendimento", "data_avaliacao", "comentario_avaliacao",
+        "data_hora_abertura", "data_inicial", "data_tecnico", "data_conclusao", "data_final"
     ]
 
-    for item in diretrizes:
-        pdf.multi_cell(0, 5, item)
-        pdf.ln(1)
-
-    pdf.ln(2)
-    pdf.multi_cell(0, 5, "Declaro estar ciente das orientações acima e comprometo-me a cumpir as normas de utilização dos recursos de Tecnologia da Informação disponibilizados pela Ferpam.\n")
-    pdf.ln(4)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(4)
-
-    pdf.set_font("Arial", "B", 10.5)
-    pdf.cell(0, 6, f"Nome Completo: {nome}", ln=True)
-    pdf.cell(0, 6, f"Cargo: {cargo}", ln=True)
-    pdf.cell(0, 6, f"Setor: {setor}", ln=True)
-    pdf.cell(0, 6, f"Data e Hora do Registro: {data_hora}", ln=True)
-
-    assinatura_temp = f"assinatura_temp_{funcionario_id}.png"
     try:
-        with open(assinatura_temp, "wb") as f:
-            f.write(assinatura_bytes)
-        pdf.ln(3)
-        pdf.cell(0, 6, "Assinatura Digitalizada:", ln=True)
-        pdf.image(assinatura_temp, x=20, y=pdf.get_y(), w=65)
-        pdf.ln(25)
-    finally:
-        if os.path.exists(assinatura_temp):
-            os.remove(assinatura_temp)
+        data = carregar_chamados()
+        if isinstance(data, dict):
+            df_raw = data.get("chamados", list(data.values())[0]).copy()
+        elif isinstance(data, pd.DataFrame):
+            df_raw = data.copy()
+        else:
+            df_raw = pd.DataFrame(data)
 
-    pdf.set_font("Arial", "I", 8)
-    pdf.set_text_color(100, 116, 139)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(2)
-    pdf.cell(0, 4, f"Metadados de Validação Jurídica (Lei 14.063/2020)", ln=True)
-    pdf.cell(0, 4, f"ID de Autenticação do Sistema: {funcionario_id}", ln=True)
-    pdf.cell(0, 4, f"Endereço de IP Origem: {ip_cliente}", ln=True)
-    pdf.multi_cell(0, 4, f"Assinatura do Dispositivo (User-Agent): {ua_cliente}")
+        if df_raw.empty:
+            df_empty = pd.DataFrame(columns=colunas_obrigatorias)
+            df_empty["nota_num"] = pd.Series(dtype=float)
+            df_empty["sla_valido"] = pd.Series(dtype=bool)
+            df_empty["eh_roadmap"] = pd.Series(dtype=bool)
+            df_empty["tem_3_datas"] = pd.Series(dtype=bool)
+            df_empty["ano_abertura"] = pd.Series(dtype=float)
+            df_empty["mes_num_abertura"] = pd.Series(dtype=float)
+            df_empty["mes_nome_abertura"] = pd.Series(dtype=str)
+            df_empty["dt_aval_parsed"] = pd.Series(dtype="datetime64[ns]")
+            return df_empty
 
-    pdf_bytes = pdf.output(dest="S")
-    if isinstance(pdf_bytes, str):
-        pdf_bytes = pdf_bytes.encode("latin1")
-    elif isinstance(pdf_bytes, bytearray):
-        pdf_bytes = bytes(pdf_bytes)
-    return pdf_bytes
+        df_raw.columns = [str(col).strip().lower() for col in df_raw.columns]
+        df_raw = df_raw.loc[:, df_raw.columns != ""]
+        df_raw = df_raw.loc[:, ~df_raw.columns.duplicated()]
 
+        mapeamento_colunas = {
+            "id": "id_chamado", "ticket": "id_chamado", "n_chamado": "id_chamado",
+            "numero": "id_chamado", "num_chamado": "id_chamado", "descricao": "ocorrencia",
+            "detalhes": "ocorrencia", "solucao": "atividade_realizada", "resolucao": "atividade_realizada",
+            "nota": "nota_atendimento", "avaliacao": "nota_atendimento",
+        }
+        df_raw = df_raw.rename(columns=mapeamento_colunas)
 
-def enviar_email(destinatario, nome, link):
-    EMAIL = "suporte.ti@ferpam.com.br"
-    SENHA = st.secrets["email"]["senha_gmail"] 
-    
-    mensagem = MIMEMultipart()
-    mensagem["From"] = EMAIL
-    mensagem["To"] = destinatario
-    mensagem["Subject"] = "Assinatura do Termo de Responsabilidade de TI - Ferpam"
+        for col in colunas_obrigatorias:
+            if col not in df_raw.columns:
+                df_raw[col] = ""
 
-    corpo = f"""Olá, {nome}!
+        for col in ["id_chamado", "solicitante", "titulo", "ocorrencia", "status", 
+                    "prioridade", "departamento", "tecnico", "cidade", "atividade_realizada"]:
+            df_raw[col] = df_raw[col].fillna("").astype(str).str.strip()
+            df_raw[col] = df_raw[col].replace({"nan": "", "None": "", "null": "", "<NA>": ""})
 
-Seja bem-vindo(a) à Ferpam.
+        # --- REMOVE APENAS MATEUS NUNES / MATHEUS NUNES ---
+        padrao_nunes = r"mat[h]?eus\s+nunes"
+        df_raw = df_raw[~df_raw["tecnico"].str.contains(padrao_nunes, case=False, regex=True, na=False)]
 
-Para concluir o seu processo de integração, solicitamos a leitura e assinatura digital do Termo de Responsabilidade e Uso dos Recursos de TI.
+        nota_limpa = df_raw["nota_atendimento"].astype(str).str.replace(",", ".", regex=False).str.strip()
+        df_raw["nota_num"] = pd.to_numeric(nota_limpa, errors="coerce")
 
-Clique no link abaixo para acessar o documento e realizar sua assinatura digital:
-{link}
-
-Atenciosamente,
-Equipe de TI - Ferpam"""
-    
-    mensagem.attach(MIMEText(corpo, "plain", "utf-8"))
-
-    try:
-        servidor = smtplib.SMTP("smtp.gmail.com", 587)
-        servidor.starttls()
-        servidor.login(EMAIL, SENHA)
-        # CORREÇÃO: Alterado de message= para msg=
-        servidor.sendmail(EMAIL, destinatario, msg=mensagem.as_string())
-        servidor.quit()
-        return True, "Sucesso"
-    except Exception as erro:
-        return False, str(erro)
-
-
-# ---------------- LOGICA DE ROTEAMENTO ----------------
-url_id = st.query_params.get("id", None)
-
-if url_id:
-    # --- VISÃO DO COLABORADOR ---
-    resposta = supabase.table("funcionarios").select("*").eq("id", url_id).execute()
-    colaborador = resposta.data[0] if len(resposta.data) > 0 else None
-    
-    if not colaborador:
-        st.error("⚠️ Link de assinatura inválido ou expirado. Entre em contato com o setor de TI.")
-    elif colaborador["assinado"]:
-        st.markdown(f"""
-            <div class="sucesso-box">
-                <h1 style="color: #166534; margin-top:0;">✓ Termo Assinado com Sucesso!</h1>
-                <p style="font-size: 16px;">Olá <b>{colaborador['nome']}</b>, suas diretrizes de responsabilidade de TI foram registradas.</p>
-                <p style="font-size: 14px; color: #65a30d;">Obrigado! Você já pode fechar esta aba.</p>
-            </div>
-        """, unsafe_allow_html=True)
-    else:
-        st.markdown("<h2 style='text-align: center; color: #0f172a;'>🏢 Assinatura de Termo Digital - Ferpam</h2>", unsafe_allow_html=True)
-        st.info(f"Colaborador: {colaborador['nome']} | Cargo: {colaborador['cargo']}")
+        df_raw["dt_abertura"] = pd.to_datetime(df_raw["data_hora_abertura"], errors="coerce", dayfirst=True).fillna(
+            pd.to_datetime(df_raw["data_inicial"], errors="coerce", dayfirst=True)
+        )
+        df_raw["dt_tecnico"] = pd.to_datetime(df_raw["data_tecnico"], errors="coerce", dayfirst=True)
+        df_raw["dt_conclusao_efetiva"] = pd.to_datetime(df_raw["data_conclusao"], errors="coerce", dayfirst=True).fillna(
+            pd.to_datetime(df_raw["data_final"], errors="coerce", dayfirst=True)
+        )
         
-        renderizar_termo_tela()
-        
-        st.subheader("🖊️ Assine abaixo utilizando o mouse ou o dedo:")
+        df_raw["dt_aval_parsed"] = pd.to_datetime(df_raw["data_avaliacao"], errors="coerce", dayfirst=True).fillna(df_raw["dt_conclusao_efetiva"])
 
-        canvas_result = st_canvas(
-            stroke_width=4, stroke_color="#000000", background_color="#FFFFFF",    
-            width=680, height=250, drawing_mode="freedraw", key=f"canvas_{url_id}", 
-            display_toolbar=False, update_streamlit=True          
+        df_raw["ano_abertura"] = df_raw["dt_abertura"].dt.year
+        df_raw["mes_num_abertura"] = df_raw["dt_abertura"].dt.month
+        df_raw["mes_nome_abertura"] = df_raw["mes_num_abertura"].map(MESES_DIC)
+
+        df_raw["tem_3_datas"] = (
+            df_raw["dt_abertura"].notna() & 
+            df_raw["dt_tecnico"].notna() & 
+            df_raw["dt_conclusao_efetiva"].notna()
         )
 
-        components.html("""
-        <script>
-            function interceptarEForcarAltura() {
-                try {
-                    var iframes = window.parent.document.querySelectorAll('iframe[title="streamlit_drawable_canvas.st_canvas"]');
-                    iframes.forEach(function(iframe) {
-                        if (iframe.getAttribute('height') !== '250') {
-                            iframe.setAttribute('height', '250');
-                            iframe.style.setProperty('height', '250px', 'important');
-                        }
-                    });
-                } catch (e) {}
-            }
-            setInterval(interceptarEForcarAltura, 200);
-        </script>
-        """, height=0, width=0)
+        df_raw["min_total"] = (df_raw["dt_conclusao_efetiva"] - df_raw["dt_abertura"]).dt.total_seconds() / 60.0
+        df_raw["min_ate_tecnico"] = (df_raw["dt_tecnico"] - df_raw["dt_abertura"]).dt.total_seconds() / 60.0
+        df_raw["min_resolucao"] = (df_raw["dt_conclusao_efetiva"] - df_raw["dt_tecnico"]).dt.total_seconds() / 60.0
 
-        ip_capturado = st_javascript("fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => d.ip)")
-        ua_capturado = st_javascript("window.navigator.userAgent")
+        df_raw.loc[~df_raw["tem_3_datas"], ["min_ate_tecnico", "min_resolucao", "min_total"]] = None
 
-        if st.button("💾 Enviar Assinatura Concluída", type="primary", use_container_width=True):
-            tem_desenho = False
-            if canvas_result.json_data is not None and len(canvas_result.json_data.get("objects", [])) > 0:
-                tem_desenho = True
+        df_raw["sla_valido"] = (
+            df_raw["tem_3_datas"] &
+            (df_raw["min_total"] >= 0) &
+            (df_raw["min_ate_tecnico"] >= 0) &
+            (df_raw["min_resolucao"] >= 0)
+        )
 
-            if not tem_desenho:
-                st.error("O quadro de assinatura está vazio. Por favor, faça sua assinatura antes de clicar em enviar.")
-            else:
-                ip_final = str(ip_capturado) if (ip_capturado and ip_capturado != "False") else "IP Não identificado"
-                ua_final = str(ua_capturado) if (ua_capturado and ua_capturado != "False") else "Dispositivo Desconhecido"
+        df_raw["eh_roadmap"] = (df_raw["min_total"] > LIMITE_ROADMAP_MINUTOS)
 
-                img_array = canvas_result.image_data.astype("uint8")
-                img = Image.fromarray(img_array)
-                background = Image.new("RGBA", img.size, (255, 255, 255))
-                img_final = Image.alpha_composite(background, img).convert("RGB")
+        return df_raw
 
-                buffered = BytesIO()
-                img_final.save(buffered, format="PNG")
-                img_bytes = buffered.getvalue()
+    except Exception as e:
+        st.error(f"Erro ao carregar dados da planilha: {e}")
+        df_err = pd.DataFrame(columns=colunas_obrigatorias)
+        df_err["nota_num"] = pd.Series(dtype=float)
+        df_err["sla_valido"] = pd.Series(dtype=bool)
+        df_err["eh_roadmap"] = pd.Series(dtype=bool)
+        df_err["tem_3_datas"] = pd.Series(dtype=bool)
+        df_err["ano_abertura"] = pd.Series(dtype=float)
+        df_err["mes_num_abertura"] = pd.Series(dtype=float)
+        df_err["mes_nome_abertura"] = pd.Series(dtype=str)
+        df_err["dt_aval_parsed"] = pd.Series(dtype="datetime64[ns]")
+        return df_err
 
-                fuso_brasilia = pytz.timezone("America/Sao_Paulo")
-                data_atual = datetime.datetime.now(fuso_brasilia).strftime("%d/%m/%Y às %H:%M:%S")
+df = carregar_dados()
 
-                supabase.table("funcionarios").update({
-                    "assinado": True,
-                    "assinatura_hex": img_bytes.hex(),
-                    "data_hora": data_atual,
-                    "ip_auditoria": ip_final,
-                    "ua_auditoria": ua_final
-                }).eq("id", colaborador["id"]).execute()
+# ============================================================
+# CLASSIFICAÇÃO DE STATUS
+# ============================================================
 
-                st.rerun()
-else:
-    # --- VISÃO DA TI COM TELA DE LOGIN SEGURA ---
-    st.markdown("<h1 style='text-align: center; color: #0f172a;'>🏢 Gestão de Integração Ferpam</h1>", unsafe_allow_html=True)
-    
-    if "autenticado" not in st.session_state:
-        st.session_state["autenticado"] = False
+def classificar_status_grupo(status_str):
+    if not status_str or str(status_str).strip() == "" or str(status_str).strip().lower() == "nan":
+        return "Abertos"
+    s = str(status_str).strip().casefold()
+    concluidos_kw = ["concluído", "concluido", "finalizado", "fechado", "resolvido", "encerrado", "cancelado"]
+    andamento_kw = ["em andamento", "em atendimento", "atendendo", "execução", "execucao", "iniciado", "aguardando", "terceiro", "solicitante"]
 
-    if not st.session_state["autenticado"]:
-        st.markdown('<div class="login-box">', unsafe_allow_html=True)
-        st.markdown("### 🔐 Área Restrita - Setor de TI")
-        usuario_input = st.text_input("Usuário")
-        senha_input = st.text_input("Senha", type="password")
-        
-        if st.button("Entrar no Painel", use_container_width=True, type="primary"):
-            if usuario_input == st.secrets["credentials"]["usuario_ti"] and senha_input == st.secrets["credentials"]["senha_ti"]:
-                st.session_state["autenticado"] = True
-                st.rerun()
-            else:
-                st.error("Usuário ou Senha inválidos.")
-        st.markdown('</div>', unsafe_allow_html=True)
+    if any(kw in s for kw in concluidos_kw):
+        return "Concluídos"
+    elif any(kw in s for kw in andamento_kw):
+        return "Em Andamento"
     else:
-        st.sidebar.markdown(f"Logado como: **{st.secrets['credentials']['usuario_ti']}**")
-        if st.sidebar.button("🚪 Sair do Painel"):
-            st.session_state["autenticado"] = False
-            st.rerun()
+        return "Abertos"
 
-        st.markdown("---")
-        tab_cadastro, tab_arquivo = st.tabs([
-            "➕ Cadastrar Integrante", 
-            "📂 Arquivo de Contratos"
-        ])
+# ============================================================
+# ESTADOS DA SESSÃO E AUXILIARES
+# ============================================================
 
-        # --- ABA 1: CADASTRO (MODIFICADA) ---
-      # --- ABA 1: CADASTRO (CORRIGIDA) ---
-        with tab_cadastro:
-            st.markdown("### 📝 Dados do Novo Colaborador")
-            col_a, col_b = st.columns(2)
-            with col_a:
-                nome_cad = st.text_input("Nome Completo", placeholder="Ex: João Neto Silva", key="cad_nome")
-                cargo_cad = st.text_input("Cargo", placeholder="Ex: Assistente Administrativo", key="cad_cargo")
-            with col_b:
-                email_cad = st.text_input("E-mail", placeholder="Ex: joao@ferpam.com.br", key="cad_email")
-                setor_cad = st.text_input("Setor", placeholder="Ex: TI", key="cad_setor")
+for key, val in [("tela", "busca"), ("ticket_aberto", None), ("autenticado_admin", False), ("filtro_dash_tipo", None), ("filtro_dash_valor", None)]:
+    if key not in st.session_state:
+        st.session_state[key] = val
 
-            # Agora o botão inicial APENAS salva no banco
-            if st.button("✨ Salvar e Gerar Link de Assinatura", use_container_width=True, type="primary"):
-                if nome_cad and cargo_cad and email_cad:
-                    funcionario_id = str(uuid.uuid4())[:8]
-                    setor_envio = setor_cad if setor_cad else "Geral"
-                    
-                    # CORREÇÃO: "email_enviado" removido para espelhar perfeitamente suas colunas do banco
-                    novo_funcionario = {
-                        "id": funcionario_id, "nome": nome_cad, "cargo": cargo_cad, "setor": setor_envio,
-                        "email": email_cad, "assinado": False, "assinatura_hex": None, "data_hora": "",
-                        "ip_auditoria": "", "ua_auditoria": ""
-                    }
-                    
-                    try:
-                        supabase.table("funcionarios").insert(novo_funcionario).execute()
-                        st.success(f"✅ {nome_cad} cadastrado com sucesso! Envie o e-mail na lista abaixo quando desejar.")
-                    except Exception as erro_banco:
-                        st.error(f"❌ Erro ao gravar no Supabase: {erro_banco}")
-                else:
-                    st.error("Por favor, preencha os campos obrigatórios.")
-            
+def abrir_ticket(ticket_id):
+    st.session_state.ticket_aberto = str(ticket_id).strip()
+    st.session_state.tela = "ticket"
+
+def voltar_busca():
+    st.session_state.ticket_aberto = None
+    st.session_state.tela = "busca"
+
+def limpar_filtro_dash():
+    st.session_state.filtro_dash_tipo = None
+    st.session_state.filtro_dash_valor = None
+
+lista_solicitantes_admin = sorted(list(set([s for s in df["solicitante"].unique() if s and s.casefold() != "nan"])), key=str.casefold)
+lista_status_opcoes = ["Todos os Status"] + sorted(list(set([s for s in df["status"].unique() if s and s.casefold() != "nan"])), key=str.casefold)
+
+AZUL_FERPAM = "#003399"
+AZUL_FERPAM_HOVER = "#002266"
+
+st.markdown(f"""
+<style>
+    header[data-testid="stHeader"] {{ background-color: transparent !important; }}
+    footer {{ visibility: hidden; }}
+    .stButton > button[data-testid="stBaseButton-primary"], button[kind="primary"] {{
+        background-color: {AZUL_FERPAM} !important; border: 1px solid {AZUL_FERPAM} !important; color: #ffffff !important; border-radius: 8px !important; font-weight: 700 !important;
+    }}
+    .stButton > button[data-testid="stBaseButton-primary"]:hover, button[kind="primary"]:hover {{
+        background-color: {AZUL_FERPAM_HOVER} !important; border-color: {AZUL_FERPAM_HOVER} !important;
+    }}
+    
+    div[data-testid="stMetric"] {{ 
+        border: 1px solid #334155 !important; 
+        border-radius: 12px !important; 
+        padding: 16px !important; 
+        background-color: #1e293b !important;
+        box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); 
+    }}
+    div[data-testid="stMetric"] label, div[data-testid="stMetric"] [data-testid="stMetricLabel"] {{
+        color: #94a3b8 !important;
+    }}
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] {{
+        color: #f8fafc !important;
+    }}
+    
+    button[data-baseweb="tab"] {{
+        color: #e2e8f0 !important;
+    }}
+    button[data-baseweb="tab"][aria-selected="true"] {{
+        background-color: #003399 !important;
+        color: #ffffff !important;
+        border-radius: 6px !important;
+    }}
+</style>
+""", unsafe_allow_html=True)
+
+# ============================================================
+# MENU LATERAL & AUTENTICAÇÃO
+# ============================================================
+
+st.sidebar.image("https://cdn-icons-png.flaticon.com/512/1063/1063376.png", width=50)
+st.sidebar.title("Portal TI")
+st.sidebar.markdown("### 🔐 Autenticação Admin")
+
+if not st.session_state.autenticado_admin:
+    with st.sidebar.expander("🔑 Áreas Restritas (Técnicos/Admin)", expanded=False):
+        usuario_login = st.text_input("Usuário", key="login_usr")
+        senha_login = st.text_input("Senha", type="password", key="login_pwd")
+        if st.button("Entrar", type="primary", use_container_width=True):
+            if usuario_login.strip() == "admin" and senha_login == "admin":
+                st.session_state.autenticado_admin = True
+                st.success("Login efetuado!")
+                st.rerun()
+            else:
+                st.error("Usuário ou senha incorretos.")
+else:
+    st.sidebar.success("⚡ Conectado como ADMIN")
+    if st.sidebar.button("🚪 Sair do Modo Admin", use_container_width=True):
+        st.session_state.autenticado_admin = False
+        st.session_state.tela = "busca"
+        limpar_filtro_dash()
+        st.rerun()
+
+st.sidebar.divider()
+opcoes_menu = ["🔍 Consultar Chamados"]
+if st.session_state.autenticado_admin:
+    opcoes_menu.append("📊 Dashboard de Indicadores")
+
+opcao_menu = st.sidebar.radio("📍 Navegação", opcoes_menu, index=0 if st.session_state.tela in ["busca", "ticket"] else 1)
+
+if opcao_menu == "📊 Dashboard de Indicadores" and st.session_state.tela != "dashboard":
+    st.session_state.tela = "dashboard"
+elif opcao_menu == "🔍 Consultar Chamados" and st.session_state.tela == "dashboard":
+    st.session_state.tela = "busca"
+
+# ============================================================
+# FUNÇÕES DE RENDERIZAÇÃO
+# ============================================================
+
+def calcular_progresso(chamado):
+    grupo = classificar_status_grupo(chamado.get("status", ""))
+    tecnico = str(chamado.get("tecnico", "")).strip().casefold()
+    atividade = str(chamado.get("atividade_realizada", "")).strip().casefold()
+    if grupo == "Concluídos": return 100, "🟢 Chamado Finalizado"
+    elif grupo == "Em Andamento": return (80, "🔵 Em Atendimento (Atividade Registrada)") if atividade and atividade != "nan" else (60, "🔵 Em Atendimento / Aguardando")
+    elif tecnico and tecnico not in ["nan", "não atribuído", "nao atribuido", ""]: return 35, "🟡 Técnico Atribuído (Aguardando Início)"
+    else: return 15, "🟠 Chamado Aberto na Fila"
+
+def get_status_badge(status):
+    status_clean = str(status).strip()
+    grupo = classificar_status_grupo(status_clean)
+    color, bg, icon = ("#10b981", "rgba(16, 185, 129, 0.12)", "🟢") if grupo == "Concluídos" else ((AZUL_FERPAM, "rgba(0, 51, 153, 0.12)", "🔵") if grupo == "Em Andamento" else ("#d97706", "rgba(217, 119, 6, 0.12)", "🟡"))
+    return f"""<span style="background-color: {bg}; color: {color}; font-weight: 700; font-size: 0.82rem; padding: 4px 12px; border-radius: 20px; border: 1px solid {color}44; display: inline-flex; align-items: center; gap: 6px;">{icon} {status_clean if status_clean else 'Aberto'}</span>"""
+
+def render_barra_progresso(pct, texto_estagio):
+    bar_color = "#10b981" if pct == 100 else (AZUL_FERPAM if pct >= 50 else "#d97706")
+    return f"""
+    <div style="margin-top: 10px; margin-bottom: 6px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+            <span style="font-size: 0.83rem; font-weight: 600; color: #94a3b8;">{texto_estagio}</span>
+            <span style="font-size: 0.85rem; font-weight: 800; color: {bar_color}; background-color: {bar_color}18; padding: 2px 10px; border-radius: 12px;">{pct}%</span>
+        </div>
+        <div style="width: 100%; background-color: #334155; height: 10px; border-radius: 6px; overflow: hidden;">
+            <div style="width: {pct}%; background-color: {bar_color}; height: 100%; border-radius: 6px;"></div>
+        </div>
+    </div>
+    """
+
+def render_estrelas(nota):
+    try:
+        val = max(1, min(5, int(float(nota))))
+        return "⭐" * val + "☆" * (5 - val) + f" ({val}/5)"
+    except (ValueError, TypeError):
+        return None
+
+def extrair_valor_clicado(event):
+    if not event or "selection" not in event: return None
+    points = event["selection"].get("points", [])
+    if not points: return None
+    p = points[0]
+    if "customdata" in p and p["customdata"]:
+        val = p["customdata"]
+        return str(val[0]).strip() if isinstance(val, list) else str(val).strip()
+    if "label" in p and p["label"] is not None: return str(p["label"]).strip()
+    if "y" in p and isinstance(p["y"], str) and p["y"]: return str(p["y"]).strip()
+    if "x" in p and isinstance(p["x"], str) and p["x"]: return str(p["x"]).strip()
+    return None
+
+def processar_clique_grafico(event, tipo_filtro):
+    val = extrair_valor_clicado(event)
+    if val and (st.session_state.filtro_dash_tipo != tipo_filtro or st.session_state.filtro_dash_valor != val):
+        st.session_state.filtro_dash_tipo = tipo_filtro
+        st.session_state.filtro_dash_valor = val
+        st.rerun()
+
+# ============================================================
+# TELA DETALHES DO TICKET
+# ============================================================
+
+if st.session_state.tela == "ticket" and st.session_state.ticket_aberto is not None:
+    ticket_id = str(st.session_state.ticket_aberto).strip()
+    resultado = df[df["id_chamado"].str.casefold() == ticket_id.casefold()]
+    if resultado.empty:
+        st.error(f"Não foi possível encontrar o ticket #{ticket_id}.")
+        st.button("← Voltar", on_click=voltar_busca)
+        st.stop()
+
+    chamado = resultado.iloc[0]
+    percentual, etapa_nome = calcular_progresso(chamado)
+    st.button("← Voltar", on_click=voltar_busca)
+    st.title(f"🎫 Ticket #{ticket_id}")
+    st.caption(f"Solicitante: {chamado.get('solicitante', 'N/A')}")
+    st.subheader("📌 Progresso da Resolução")
+    st.markdown(render_barra_progresso(percentual, etapa_nome), unsafe_allow_html=True)
+    
+    if chamado.get("eh_roadmap"):
+        st.warning("🚀 **Este chamado é considerado ROADMAP (Tempo total superior a 6 dias).**")
+
+    st.divider()
+
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.markdown("**Status Atual**")
+        st.markdown(get_status_badge(chamado["status"]), unsafe_allow_html=True)
+        st.write("")
+        st.markdown("**👤 Solicitante**")
+        st.write(chamado.get("solicitante", "-"))
+    with col2:
+        st.markdown("**⚠️ Prioridade**")
+        st.write(chamado.get("prioridade", "-"))
+        st.markdown("**🏢 Departamento**")
+        st.write(chamado.get("departamento", "-"))
+    with col3:
+        st.markdown("**👨‍💻 Técnico Responsável**")
+        st.write(chamado.get("tecnico", "Ainda não atribuído"))
+        st.markdown("**📍 Cidade**")
+        st.write(chamado.get("cidade", "-"))
+
+    st.divider()
+
+    st.subheader("⏱️ Tempos de Atendimento do Chamado")
+    if chamado.get("sla_valido"):
+        t1, t2, t3 = st.columns(3)
+        with t1:
+            st.metric("⏳ Tempo até Atendimento", formatar_tempo(chamado.get("min_ate_tecnico")))
+        with t2:
+            st.metric("🔧 Tempo Execução/Técnico", formatar_tempo(chamado.get("min_resolucao")))
+        with t3:
+            st.metric("🏁 Tempo Total de Conclusão", formatar_tempo(chamado.get("min_total")))
+    else:
+        st.info("ℹ️ Para exibir as métricas completas de SLA, é necessário que as 3 datas (Abertura, Início Técnico e Conclusão) estejam registradas na planilha.")
+
+    st.divider()
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.subheader("📋 Detalhes da Solicitação")
+        st.markdown(f"**Título:** {chamado.get('titulo', '-')}")
+        ocorrencia = str(chamado.get("ocorrencia", "")).strip()
+        st.info(ocorrencia if ocorrencia and ocorrencia.casefold() != "nan" else "Nenhuma descrição fornecida.")
+    with col_b:
+        st.subheader("🔧 Resolução / Atividade Realizada")
+        atividade = str(chamado.get("atividade_realizada", "")).strip()
+        st.success(atividade if atividade and atividade.casefold() != "nan" else "Ainda não há atividades registradas para este chamado.")
+
+    nota = chamado.get("nota_atendimento", "")
+    data_aval = str(chamado.get("data_avaliacao", "")).strip()
+    coment_aval = str(chamado.get("comentario_avaliacao", "")).strip()
+
+    if (pd.notna(chamado.get("nota_num")) and chamado.get("nota_num") > 0) or (coment_aval and coment_aval.casefold() != "nan"):
+        st.divider()
+        st.subheader("⭐ Avaliação do Atendimento")
+        col_eval1, col_eval2 = st.columns([1, 2])
+        with col_eval1:
+            if pd.notna(chamado.get("nota_num")):
+                estrelas = render_estrelas(chamado["nota_num"])
+                if estrelas: st.markdown(f"### {estrelas}")
+            if data_aval and data_aval.casefold() != "nan":
+                st.caption(f"🗓️ Avaliado em: {data_aval}")
+        with col_eval2:
+            if coment_aval and coment_aval.casefold() != "nan":
+                st.markdown("💬 **Comentário do Solicitante:**")
+                st.write(f'"{coment_aval}"')
+    st.stop()
+
+# ============================================================
+# TELA DE BUSCA DE CHAMADOS
+# ============================================================
+
+if st.session_state.tela == "busca":
+    st.title("🎫 Portal de Consulta de Chamados")
+    if not st.session_state.autenticado_admin:
+        st.write("Digite o **Número do Chamado** ou o **Seu Nome** e escolha o status para consultar.")
+        c1, c2, c3 = st.columns([1.5, 2, 1.5])
+        with c1: input_ticket = st.text_input("Número do Chamado", placeholder="Ex.: 933")
+        with c2: input_nome = st.text_input("Seu Nome (Solicitante)", placeholder="Ex.: Carla")
+        with c3: input_status = st.selectbox("Status / Pendência", options=lista_status_opcoes, key="usr_status")
+        btn_pesquisar = st.button("🔍 Pesquisar Chamado", type="primary", use_container_width=True)
+
+        if btn_pesquisar or input_ticket.strip() or input_nome.strip() or input_status != "Todos os Status":
+            res = df.copy()
+            if input_ticket.strip(): res = res[res["id_chamado"].str.contains(input_ticket.strip(), case=False, na=False)]
+            if input_nome.strip(): res = res[res["solicitante"].str.contains(input_nome.strip(), case=False, na=False)]
+            if input_status != "Todos os Status": res = res[res["status"].str.casefold() == input_status.casefold()]
+
             st.divider()
-            
-            # Seção para disparar e-mails manualmente
-            st.markdown("### ✉️ Disparo Manual de Links")
-            resposta_pendentes = supabase.table("funcionarios").select("*").eq("assinado", False).order("nome").execute()
-            pendentes_email = resposta_pendentes.data
-
-            if not pendentes_email:
-                st.caption("Nenhum colaborador aguardando envio de link no momento.")
+            if not input_ticket.strip() and not input_nome.strip() and input_status == "Todos os Status":
+                st.info("💡 Informe o número do ticket, seu nome ou escolha um status para iniciar.")
+            elif res.empty:
+                st.warning("Nenhum chamado foi encontrado com esses critérios.")
             else:
-                for p in pendentes_email:
-                    c1, c2 = st.columns([3, 1])
-                    link_unico = f"https://termo-ferpam.streamlit.app/?id={p['id']}"
-                    
-                    with c1:
-                        st.markdown(f"**{p['nome']}** ({p['email']})")
-                        st.caption(f"Cargo: {p['cargo']} | Link: `{link_unico}`")
-                    with c2:
-                        # Botão que efetivamente envia o e-mail quando você clica
-                        if st.button("🚀 Enviar E-mail", key=f"env_mail_{p['id']}", use_container_width=True):
-                            enviado, motivo_erro = enviar_email(p["email"], p["nome"], link_unico)
-                            if enviado:
-                                st.toast(f"E-mail enviado para {p['nome']}!")
-                            else:
-                                st.error(f"Erro ao enviar: {motivo_erro}")
+                st.subheader(f"Localizado(s) {len(res)} chamado(s):")
+                for idx, cham in res.reset_index(drop=True).iterrows():
+                    t_id = str(cham["id_chamado"]).strip()
+                    pct, status_txt = calcular_progresso(cham)
+                    badge_html = get_status_badge(cham.get("status", ""))
+                    bar_html = render_barra_progresso(pct, status_txt)
+                    with st.container(border=True):
+                        col1, col2 = st.columns([7, 3])
+                        with col1:
+                            st.markdown(f"""
+                            <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px;">
+                                <span style="font-size: 1.2rem; font-weight: 800;">🎫 #{t_id}</span>
+                                {badge_html}
+                            </div>
+                            <div style="font-size: 1rem; font-weight: 700; margin-bottom: 4px;">{cham.get('titulo', 'Sem título')}</div>
+                            <div style="font-size: 0.85rem; color: #94a3b8;">👤 {cham.get('solicitante', '-')} | 🏢 {cham.get('departamento', '-')}</div>
+                            """, unsafe_allow_html=True)
+                            st.markdown(bar_html, unsafe_allow_html=True)
+                        with col2:
+                            st.write("")
+                            st.write("")
+                            st.button("👁️ Ver detalhes", key=f"btn_usr_{t_id}_{idx}", on_click=abrir_ticket, args=(t_id,), use_container_width=True)
+    else:
+        st.write("🔧 **Painel Admin**: Filtragem global de chamados.")
+        c1, c2, c3 = st.columns([1.5, 2, 1.5])
+        with c1: input_ticket_admin = st.text_input("Número do Ticket", placeholder="Ex.: 933")
+        with c2: input_solic_admin = st.selectbox("Filtrar por Solicitante", options=["Todos"] + lista_solicitantes_admin)
+        with c3: input_status_admin = st.selectbox("Status / Pendência", options=lista_status_opcoes, key="adm_status")
+        res = df.copy()
+        if input_ticket_admin.strip(): res = res[res["id_chamado"].str.contains(input_ticket_admin.strip(), case=False, na=False)]
+        if input_solic_admin != "Todos": res = res[res["solicitante"].str.casefold() == input_solic_admin.casefold()]
+        if input_status_admin != "Todos os Status": res = res[res["status"].str.casefold() == input_status_admin.casefold()]
 
-        # --- ABA 2: ARQUIVO ---
-        with tab_arquivo:
-            st.markdown("### 📂 Contratos Concluídos")
-            
-            resposta_todos = supabase.table("funcionarios").select("*").order("nome").execute()
-            todos_funcionarios = resposta_todos.data
-            
-            assinados = [f for f in todos_funcionarios if f["assinado"]]
-            pendentes_lista = [f for f in todos_funcionarios if not f["assinado"]]
-            
-            if not pendentes_lista:
-                st.caption("Não há assinaturas pendentes no momento.")
-            else:
-                st.markdown(f"**Pendentes de Assinatura ({len(pendentes_lista)}):**")
-                for p in pendentes_lista:
-                    col_pend1, col_pend2 = st.columns([4, 1])
-                    with col_pend1:
-                        st.caption(f"⏳ {p['nome']} ({p['email']}) - ID: {p['id']}")
-                    with col_pend2:
-                        if st.button("❌", key=f"del_pend_{p['id']}", help="Cancelar envio/Excluir pendente"):
-                            supabase.table("funcionarios").delete().eq("id", p["id"]).execute()
+        st.divider()
+        if res.empty:
+            st.warning("Nenhum chamado encontrado com estes filtros.")
+        else:
+            st.subheader(f"Total na consulta: {len(res)} chamado(s)")
+            for idx, cham in res.reset_index(drop=True).iterrows():
+                t_id = str(cham["id_chamado"]).strip()
+                pct, status_txt = calcular_progresso(cham)
+                badge_html = get_status_badge(cham.get("status", ""))
+                bar_html = render_barra_progresso(pct, status_txt)
+                with st.container(border=True):
+                    col1, col2 = st.columns([7, 3])
+                    with col1:
+                        st.markdown(f"""
+                        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 6px;">
+                            <span style="font-size: 1.2rem; font-weight: 800;">🎫 #{t_id}</span>
+                            {badge_html}
+                        </div>
+                        <div style="font-size: 1rem; font-weight: 700;">{cham.get('titulo', 'Sem título')}</div>
+                        <div style="font-size: 0.85rem; color: #94a3b8;">👤 {cham.get('solicitante', '-')} | 🏢 {cham.get('departamento', '-')}</div>
+                        """, unsafe_allow_html=True)
+                        st.markdown(bar_html, unsafe_allow_html=True)
+                    with col2:
+                        st.write("")
+                        st.write("")
+                        st.button("👁️ Ver detalhes", key=f"btn_adm_{t_id}_{idx}", on_click=abrir_ticket, args=(t_id,), use_container_width=True)
+
+# ============================================================
+# TELA DASHBOARD DE INDICADORES
+# ============================================================
+
+if st.session_state.tela == "dashboard":
+    if not st.session_state.autenticado_admin:
+        st.error("⛔ Acesso Negado! Faça login como admin no menu lateral para visualizar o Dashboard.")
+        st.stop()
+
+    st.title("📊 Dashboard & Indicadores de TI")
+    def aplicar_layout_plotly(fig):
+        fig.update_layout(paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)", font=dict(color="#f8fafc"), margin=dict(t=30, b=20, l=20, r=20))
+        return fig
+
+    tab_op, tab_sla, tab_csat, tab_reviews = st.tabs([
+        "📊 Operação & Volumetria", 
+        "⏱️ SLAs & Médias de Tempo",
+        "⭐ Satisfação & Notas (CSAT)", 
+        "💬 Feed de Reviews & Feedback"
+    ])
+
+    # ============================================================
+    # TAB 1: OPERAÇÃO & VOLUMETRIA
+    # ============================================================
+    with tab_op:
+        st.caption("⚡ **Filtre por Ano/Mês** ou clique nos gráficos para detalhar a operação!")
+
+        anos_disponiveis = sorted([int(a) for a in df["ano_abertura"].dropna().unique()], reverse=True)
+        opcoes_anos = ["Todos os Anos"] + anos_disponiveis
+        
+        f_col1, f_col2, f_col3 = st.columns([2, 2, 4])
+        with f_col1:
+            ano_sel = st.selectbox("📅 Escolha o Ano", options=opcoes_anos, index=0)
+
+        if ano_sel == "Todos os Anos":
+            df_ano = df.copy()
+        else:
+            df_ano = df[df["ano_abertura"] == ano_sel]
+
+        meses_nums = sorted([int(m) for m in df_ano["mes_num_abertura"].dropna().unique()])
+        opcoes_meses = ["Todos os Meses"] + [MESES_DIC[m] for m in meses_nums if m in MESES_DIC]
+
+        with f_col2:
+            mes_sel = st.selectbox("🗓️ Escolha o Mês", options=opcoes_meses, index=0)
+
+        df_op_base = df_ano.copy()
+        if mes_sel != "Todos os Meses":
+            df_op_base = df_op_base[df_op_base["mes_nome_abertura"] == mes_sel]
+
+        st.divider()
+
+        # --- CÁLCULO E DETALHAMENTO DE STATUS "EM ANDAMENTO" ---
+        df_dash = df_op_base.copy()
+        df_dash["grupo_status"] = df_dash["status"].apply(classificar_status_grupo)
+
+        total_chamados = len(df_dash)
+        concluidos = len(df_dash[df_dash["grupo_status"] == "Concluídos"])
+        em_andamento = len(df_dash[df_dash["grupo_status"] == "Em Andamento"])
+        pendentes = len(df_dash[df_dash["grupo_status"] == "Abertos"])
+        taxa_conclusao = (concluidos / total_chamados * 100) if total_chamados > 0 else 0
+
+        # Mapeia quais são os status específicos dentro de "Em Andamento" e suas quantidades
+        df_andamento_detalhes = (
+            df_dash[df_dash["grupo_status"] == "Em Andamento"]["status"]
+            .replace("", "Em Atendimento")
+            .value_counts()
+        )
+
+        m1, m2, m3, m4, m5 = st.columns(5)
+        with m1:
+            st.metric("Total Chamados", total_chamados)
+            if st.button("👁️ Ver Todos", key="btn_kpi_total", use_container_width=True):
+                limpar_filtro_dash()
+                st.rerun()
+        with m2:
+            st.metric("🟢 Concluídos", concluidos)
+            if st.button("🔍 Concluídos", key="btn_kpi_concluidos", use_container_width=True, type=("primary" if st.session_state.filtro_dash_valor == "Concluídos" else "secondary")):
+                st.session_state.filtro_dash_tipo = "status_grupo"
+                st.session_state.filtro_dash_valor = "Concluídos"
+                st.rerun()
+        with m3:
+            st.metric("🔵 Em Andamento", em_andamento)
+            if st.button("🔍 Andamento", key="btn_kpi_andamento", use_container_width=True, type=("primary" if st.session_state.filtro_dash_valor == "Em Andamento" else "secondary")):
+                st.session_state.filtro_dash_tipo = "status_grupo"
+                st.session_state.filtro_dash_valor = "Em Andamento"
+                st.rerun()
+        with m4:
+            st.metric("🟡 Abertos", pendentes)
+            if st.button("🔍 Abertos", key="btn_kpi_abertos", use_container_width=True, type=("primary" if st.session_state.filtro_dash_valor == "Abertos" else "secondary")):
+                st.session_state.filtro_dash_tipo = "status_grupo"
+                st.session_state.filtro_dash_valor = "Abertos"
+                st.rerun()
+        with m5:
+            st.metric("📈 Taxa Resolução", f"{taxa_conclusao:.1f}%")
+
+        # --- BLOCO DE DETALHAMENTO DE STATUS "EM ANDAMENTO" ---
+        if not df_andamento_detalhes.empty:
+            with st.expander("📌 **Ver Detalhamento dos Chamados em Andamento**", expanded=True):
+                st.caption("Clique em qualquer um para filtrar diretamente na lista:")
+                cols_andamento = st.columns(min(len(df_andamento_detalhes), 5))
+                for i, (st_nome, st_qtd) in enumerate(df_andamento_detalhes.items()):
+                    col_idx = i % len(cols_andamento)
+                    with cols_andamento[col_idx]:
+                        if st.button(f"**{st_nome}**: {st_qtd}", key=f"btn_sub_status_{i}", use_container_width=True):
+                            st.session_state.filtro_dash_tipo = "status"
+                            st.session_state.filtro_dash_valor = st_nome
                             st.rerun()
 
-            st.divider()
+        st.divider()
 
-            if not assinados:
-                st.info("Nenhum termo assinado armazenado em banco ainda.")
-            else:
-                for f in assinados:
-                    col_info, col_botoes = st.columns([3, 2])
-                    with col_info:
-                        st.markdown(f"##### 📄 {f['nome']}")
-                        st.caption(f"**Cargo:** {f['cargo']} | **Setor:** {f['setor']} | **Em:** {f['data_hora']}")
-                    with col_botoes:
-                        sub_col1, sub_col2 = st.columns(2)
-                        with sub_col1:
-                            if f.get("assinatura_hex"):
-                                sig_bytes = bytes.fromhex(f["assinatura_hex"])
-                                pdf_sob_demanda = gerar_pdf_contrato(
-                                    f["nome"], f["cargo"], f["setor"], f["data_hora"], 
-                                    sig_bytes, f["id"], f.get("ip_auditoria", "Não registrado"), f.get("ua_auditoria", "Não registrado")
-                                )
-                                st.download_button(
-                                    "📥 Baixar PDF", 
-                                    pdf_sob_demanda, 
-                                    file_name=f"Termo_TI_{f['nome'].replace(' ', '_')}.pdf", 
-                                    mime="application/pdf", 
-                                    key=f"down_{f['id']}"
-                                )
-                        with sub_col2:
-                            if st.button("❌ Deletar", key=f"del_{f['id']}", type="secondary"):
-                                supabase.table("funcionarios").delete().eq("id", f["id"]).execute()
-                                st.toast(f"Registro de {f['nome']} removed com sucesso!")
-                                st.rerun()
-                    st.divider()
+        g1, g2 = st.columns(2)
+        with g1:
+            st.subheader("🍩 Distribuição por Status")
+            s_counts = df_op_base["status"].replace("", "Aberto / Sem Status").value_counts().reset_index()
+            s_counts.columns = ["Status", "Quantidade"]
+            fig_status = px.pie(s_counts, names="Status", values="Quantidade", hole=0.45, custom_data=["Status"])
+            evt_status = st.plotly_chart(aplicar_layout_plotly(fig_status), use_container_width=True, on_select="rerun", selection_mode="points", key="chart_status")
+            processar_clique_grafico(evt_status, "status")
+
+        with g2:
+            st.subheader("⚠️ Chamados por Prioridade")
+            df_prio = df_op_base["prioridade"].replace("", "Não Informado").value_counts().reset_index()
+            df_prio.columns = ["Prioridade", "Quantidade"]
+            fig_prio = px.bar(df_prio, x="Prioridade", y="Quantidade", text="Quantidade", color="Prioridade", custom_data=["Prioridade"])
+            fig_prio.update_layout(showlegend=False)
+            evt_prio = st.plotly_chart(aplicar_layout_plotly(fig_prio), use_container_width=True, on_select="rerun", selection_mode="points", key="chart_prio")
+            processar_clique_grafico(evt_prio, "prioridade")
+
+        st.divider()
+        g3, g4 = st.columns(2)
+        with g3:
+            st.subheader("🏢 Demandas por Departamento")
+            df_dep = df_op_base["departamento"].replace("", "Outros").value_counts().head(10).reset_index()
+            df_dep.columns = ["Departamento", "Quantidade"]
+            fig_dep = px.bar(df_dep, y="Departamento", x="Quantidade", orientation="h", text="Quantidade", custom_data=["Departamento"])
+            fig_dep.update_layout(yaxis=dict(autorange="reversed"))
+            evt_dep = st.plotly_chart(aplicar_layout_plotly(fig_dep), use_container_width=True, on_select="rerun", selection_mode="points", key="chart_dep")
+            processar_clique_grafico(evt_dep, "departamento")
+
+        with g4:
+            st.subheader("👨‍💻 Atendimentos por Técnico")
+            df_tec = df_op_base["tecnico"].replace("", "Não Atribuído").value_counts().reset_index()
+            df_tec.columns = ["Técnico", "Quantidade"]
+            fig_tec = px.bar(df_tec, x="Técnico", y="Quantidade", text="Quantidade", custom_data=["Técnico"])
+            evt_tec = st.plotly_chart(aplicar_layout_plotly(fig_tec), use_container_width=True, on_select="rerun", selection_mode="points", key="chart_tec")
+            processar_clique_grafico(evt_tec, "tecnico")
+
+        st.divider()
+
+        df_filtrado_dash = df_dash.copy()
+        tipo_filtro = st.session_state.filtro_dash_tipo
+        valor_filtro = st.session_state.filtro_dash_valor
+
+        rotulo_periodo = f"{mes_sel} / {ano_sel}" if ano_sel != "Todos os Anos" else f"{mes_sel} (Todos os Anos)"
+
+        if tipo_filtro and valor_filtro:
+            if tipo_filtro == "status_grupo":
+                df_filtrado_dash = df_filtrado_dash[df_filtrado_dash["grupo_status"] == valor_filtro]
+            elif tipo_filtro == "status":
+                df_filtrado_dash = df_filtrado_dash[df_filtrado_dash["status"].replace("", "Aberto / Sem Status") == valor_filtro]
+            elif tipo_filtro == "prioridade":
+                df_filtrado_dash = df_filtrado_dash[df_filtrado_dash["prioridade"].replace("", "Não Informado") == valor_filtro]
+            elif tipo_filtro == "departamento":
+                df_filtrado_dash = df_filtrado_dash[df_filtrado_dash["departamento"].replace("", "Outros") == valor_filtro]
+            elif tipo_filtro == "tecnico":
+                df_filtrado_dash = df_filtrado_dash[df_filtrado_dash["tecnico"].replace("", "Não Atribuído") == valor_filtro]
+
+            st.markdown(f"### 📋 Listagem de Chamados Filtrados ({len(df_filtrado_dash)} encontrados)")
+            st.info(f"Filtro ativo: **{tipo_filtro.upper()}** = `{valor_filtro}` no período `{rotulo_periodo}`")
+            if st.button("✖️ Limpar Filtro de Seleção", type="primary"):
+                limpar_filtro_dash()
+                st.rerun()
+        else:
+            st.markdown(f"### 📋 Todos os Chamados do Período ({len(df_filtrado_dash)} chamados)")
+
+        cols_vis = ["id_chamado", "solicitante", "titulo", "status", "prioridade", "departamento", "tecnico"]
+        st.dataframe(df_filtrado_dash[cols_vis], use_container_width=True, hide_index=True)
+
+    # ============================================================
+    # TAB 2: SLAS & MÉDIAS DE TEMPO (RIGOROSO COM 3 DATAS)
+    # ============================================================
+    with tab_sla:
+        st.subheader("⏱️ Métricas de SLA (Exige as 3 datas preenchidas)")
+        st.caption("ℹ️ **Atribuição, Execução e Conclusão** só consideram chamados onde as 3 datas (Abertura, Início Técnico e Conclusão) estejam totalmente registradas.")
+
+        df_sla = df[df["sla_valido"] == True]
+
+        df_sla_padrao = df_sla[df_sla["eh_roadmap"] == False]
+        df_sla_roadmap = df_sla[df_sla["eh_roadmap"] == True]
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        with c1:
+            st.metric("SLA Válidos", len(df_sla))
+        with c2:
+            med_assumir = df_sla["min_ate_tecnico"].dropna().mean() if not df_sla.empty else 0
+            st.metric("Média Atribuição", formatar_tempo(med_assumir))
+        with c3:
+            med_exec = df_sla["min_resolucao"].dropna().mean() if not df_sla.empty else 0
+            st.metric("Média Execução", formatar_tempo(med_exec))
+        with c4:
+            med_total_padrao = df_sla_padrao["min_total"].dropna().mean() if not df_sla_padrao.empty else 0
+            st.metric("Média Total (Padrão <= 6d)", formatar_tempo(med_total_padrao))
+        with c5:
+            med_total_roadmap = df_sla_roadmap["min_total"].dropna().mean() if not df_sla_roadmap.empty else 0
+            st.metric("🚀 Média Total (Roadmap > 6d)", formatar_tempo(med_total_roadmap))
+
+        st.divider()
+        st.subheader("👨‍💻 Desempenho e Tempos por Técnico")
+        
+        if not df_sla.empty:
+            tecnicos_no_sla = sorted(list(set([t for t in df_sla["tecnico"].unique() if t and t != "nan"])))
+            
+            linhas_tecnicos = []
+            for tec in tecnicos_no_sla:
+                df_tec_todos = df_sla[df_sla["tecnico"] == tec]
+                df_tec_p = df_sla_padrao[df_sla_padrao["tecnico"] == tec]
+                df_tec_r = df_sla_roadmap[df_sla_roadmap["tecnico"] == tec]
+
+                if not df_tec_todos.empty:
+                    linhas_tecnicos.append({
+                        "Técnico": tec,
+                        "Total Resolvidos": len(df_tec_todos),
+                        "Qtd Roadmap (>6d)": len(df_tec_r),
+                        "Média Atribuição": formatar_tempo(df_tec_todos["min_ate_tecnico"].dropna().mean()),
+                        "Média Execução": formatar_tempo(df_tec_todos["min_resolucao"].dropna().mean()),
+                        "Média Conclusão (Padrão)": formatar_tempo(df_tec_p["min_total"].dropna().mean()) if not df_tec_p.empty else "N/A",
+                        "🚀 Média Conclusão (Roadmap)": formatar_tempo(df_tec_r["min_total"].dropna().mean()) if not df_tec_r.empty else "N/A",
+                    })
+
+            if linhas_tecnicos:
+                df_tec_sla_display = pd.DataFrame(linhas_tecnicos)
+                st.dataframe(df_tec_sla_display, use_container_width=True, hide_index=True)
+        else:
+            st.warning("Nenhum chamado finalizado possui as 3 datas válidas registradas para exibição dos tempos.")
+
+        st.divider()
+        st.subheader("🚀 Detalhamento dos Chamados Roadmap (> 6 Dias)")
+        if df_sla_roadmap.empty:
+            st.success("Nenhum chamado ultrapassou 6 dias de atendimento!")
+        else:
+            st.warning(f"Identificados **{len(df_sla_roadmap)}** chamado(s) finalizado(s) com tempo superior a 6 dias:")
+            
+            df_rm_disp = df_sla_roadmap.copy()
+            df_rm_disp["Tempo Total Em Dias"] = df_rm_disp["min_total"].apply(formatar_tempo)
+            st.dataframe(
+                df_rm_disp[["id_chamado", "solicitante", "titulo", "tecnico", "departamento", "status", "Tempo Total Em Dias"]], 
+                use_container_width=True, 
+                hide_index=True
+            )
+
+    # ============================================================
+    # TAB 3: SATISFAÇÃO & NOTAS (CSAT)
+    # ============================================================
+    with tab_csat:
+        st.subheader("⭐ Indicadores de CSAT & Avaliações")
+        df_avaliados = df[df["nota_num"].notna() & (df["nota_num"] > 0)]
+
+        if df_avaliados.empty:
+            st.warning("Ainda não há chamados com notas numéricas registradas na planilha.")
+        else:
+            total_aval = len(df_avaliados)
+            media_csat = df_avaliados["nota_num"].mean()
+            notas_5 = len(df_avaliados[df_avaliados["nota_num"] == 5])
+            pct_5 = (notas_5 / total_aval) * 100
+
+            cs1, cs2, cs3 = st.columns(3)
+            with cs1: st.metric("Total de Avaliações", total_aval)
+            with cs2: st.metric("Média CSAT Geral", f"⭐ {media_csat:.2f} / 5.0")
+            with cs3: st.metric("Avaliações 5 Estrelas", f"{pct_5:.1f}% ({notas_5})")
+
+            st.divider()
+            col_cs1, col_cs2 = st.columns(2)
+            with col_cs1:
+                st.subheader("📊 Distribuição das Notas (1 a 5)")
+                df_notas_dist = df_avaliados["nota_num"].astype(int).value_counts().reset_index()
+                df_notas_dist.columns = ["Nota", "Quantidade"]
+                fig_csat = px.bar(df_notas_dist, x="Nota", y="Quantidade", text="Quantidade", color="Nota")
+                st.plotly_chart(aplicar_layout_plotly(fig_csat), use_container_width=True)
+
+            with col_cs2:
+                st.subheader("👨‍💻 Média de Notas por Técnico")
+                df_tec_csat = df_avaliados.groupby("tecnico")["nota_num"].agg(["count", "mean"]).reset_index()
+                df_tec_csat.columns = ["Técnico", "Qtd Avaliações", "Média Nota"]
+                df_tec_csat["Média Nota"] = df_tec_csat["Média Nota"].round(2)
+                st.dataframe(df_tec_csat, use_container_width=True, hide_index=True)
+
+    # ============================================================
+    # TAB 4: FEED DE REVIEWS & FEEDBACK
+    # ============================================================
+    with tab_reviews:
+        st.subheader("💬 Comentários e Avaliações dos Solicitantes")
+        df_comentarios = df[df["comentario_avaliacao"].notna() & (df["comentario_avaliacao"].str.strip() != "") & (df["comentario_avaliacao"].str.casefold() != "nan")]
+
+        if df_comentarios.empty:
+            st.info("Nenhum comentário/feedback foi deixado nos chamados até o momento.")
+        else:
+            st.write(f"Exibindo **{len(df_comentarios)}** comentários de usuários:")
+            for idx, row in df_comentarios.sort_values(by="dt_aval_parsed", ascending=False).reset_index(drop=True).iterrows():
+                with st.container(border=True):
+                    c_h1, c_h2 = st.columns([3, 1])
+                    with c_h1:
+                        num_nota = row.get("nota_num")
+                        str_estrelas = render_estrelas(num_nota) if pd.notna(num_nota) else "Sem nota atribuída"
+                        st.markdown(f"**🎫 #{row['id_chamado']} - {row['solicitante']}** ({row['departamento']})")
+                        st.caption(f"Técnico Responsável: {row['tecnico']}")
+                    with c_h2:
+                        st.markdown(f"**{str_estrelas}**")
+                        if str(row.get("data_avaliacao", "")).strip():
+                            st.caption(f"🗓️ {row['data_avaliacao']}")
+
+                    st.markdown(f'*" {row["comentario_avaliacao"]} "*')
