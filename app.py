@@ -3,7 +3,7 @@ import streamlit.components.v1 as components
 import uuid
 import datetime
 import pytz
-import os  # <-- Adicionado para evitar erro na deleção do arquivo temporário do PDF
+import os
 from io import BytesIO
 from PIL import Image
 from streamlit_drawable_canvas import st_canvas
@@ -13,10 +13,9 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from streamlit_javascript import st_javascript
 
-# 🔥 INTERCEPTAÇÃO E CORREÇÃO DE COMPATIBILIDADE HTTP2 (MATA O BUG DO TYPEERROR & ATTRIBUTEERROR)
+# 🔥 INTERCEPTAÇÃO E CORREÇÃO DE COMPATIBILIDADE HTTP2
 import httpx
 
-# Verifica qual o nome correto da classe na versão instalada do httpx
 if hasattr(httpx, "Client"):
     TargetClient = httpx.Client
 elif hasattr(httpx, "SyncClient"):
@@ -29,15 +28,15 @@ if TargetClient:
 
     def patched_init(self, *args, **kwargs):
         if "http2" in kwargs:
-            kwargs["http2"] = False  # Desativa o HTTP2 que quebra o Python no Streamlit Cloud
+            kwargs["http2"] = False  # Desativa HTTP2 para evitar erros no Streamlit Cloud
         original_init(self, *args, **kwargs)
 
     TargetClient.__init__ = patched_init
 
-# 🔥 IMPORTAÇÃO DO BANCO DE DADOS CLIENTE DO SUPABASE
+# 🔥 IMPORTAÇÃO DO BANCO DE DADOS SUPABASE
 from supabase import create_client, Client
 
-# Configurações de layout
+# Configurações do Layout
 st.set_page_config(page_title="Portal de Assinaturas - Ferpam", page_icon="🏢", layout="centered")
 
 # CSS CUSTOMIZADO
@@ -76,11 +75,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 
-# 🔥 INICIALIZAÇÃO DA CONEXÃO DO SUPABASE
+# 🔥 INICIALIZAÇÃO DA CONEXÃO COM O SUPABASE
 @st.cache_resource
 def iniciar_banco() -> Client:
-    url = st.secrets["supabase"]["url"]
-    key = st.secrets["supabase"]["key"]
+    url = st.secrets["supabase"]["url"].strip().rstrip('/')
+    key = st.secrets["supabase"]["key"].strip()
     return create_client(url, key)
 
 supabase = iniciar_banco()
@@ -91,11 +90,11 @@ def renderizar_termo_tela():
 <h3 style="text-align:center; margin-top:0; margin-bottom:20px; color: #0f172a;">TERMO DE RESPONSABILIDADE E USO DOS RECURSOS DE TI</h3>
 <p>Este Termo tem como objetivo estabelecer as diretrizes para o uso adequado dos recursos de Tecnologia da Informação disponibilizados pela Ferpam, garantindo a segurança, a integridade e a confidencialidade das informações da empresa.</p>
 <p>Ao receber acesso aos sistemas, equipamentos e recursos tecnológicos da Ferpam, o colaborador declara estar ciente e concorda com as seguintes responsabilidades:</p>
-<p><b>1. Confidencialidade das Informações</b><br>Todas as informações acessadas durante as atividades profissionais são de uso exclusive da Ferpam e não devem ser divulgadas, compartilhadas ou utilizadas para fins pessoais ou externos sem autorização.</p>
+<p><b>1. Confidencialidade das Informações</b><br>Todas as informações acessadas durante as atividades profissionais são de uso exclusivo da Ferpam e não devem ser divulgadas, compartilhadas ou utilizadas para fins pessoais ou externos sem autorização.</p>
 <p><b>2. Instalação de Programas e Equipamentos</b><br>A instalação de programas, aplicativos, extensões, equipamentos ou qualquer alteração nos computadores e dispositivos da empresa deve ser realizada exclusivamente pelo setor de TI. Não é permitido instalar softwares ou aplicativos por conta própria.</p>
 <p><b>3. Uso de E-mails e Dispositivos Pessoais</b><br>O uso de e-mails pessoais, pendrives, cartões de memória, serviços de armazenamento em nuvem e aplicativos de comunicação para manipulação de informações da empresa deve ocorrer apenas quando autorizado pela gestão ou pelo setor de TI.</p>
 <p><b>4. Uso da Internet</b><br>O acesso à internet disponibilizado pela empresa deve ser utilizado prioritariamente para atividades relacionadas ao trabalho. O acesso a conteúdos inadequados, ilegais ou que possam comprometer a segurança da empresa é proibido.</p>
-<p><b>5. Senhas de Acesso</b><br>Las senhas fornecidas para acesso aos sistemas são pessoais e intransferíveis. Não é permitido compartilhar senhas com outros colaboradores ou terceiros.</p>
+<p><b>5. Senhas de Acesso</b><br>As senhas fornecidas para acesso aos sistemas são pessoais e intransferíveis. Não é permitido compartilhar senhas com outros colaboradores ou terceiros.</p>
 <p><b>6. Segurança das Senhas</b><br>O colaborador compromete-se a:<br>
 - Não anotar senhas em locais visíveis;<br>
 - Não salvar senhas em arquivos desprotegidos;<br>
@@ -113,12 +112,17 @@ def renderizar_termo_tela():
     st.markdown(html_conteudo, unsafe_allow_html=True)
 
 
+def converter_texto_latin1(texto):
+    """Auxiliar para evitar exceção de encode de caracteres no FPDF"""
+    return texto.encode('latin-1', 'replace').decode('latin-1')
+
+
 def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funcionario_id, ip_cliente="Não capturado", ua_cliente="Não capturado"):
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
     pdf.set_font("Arial", "B", 14)
-    pdf.cell(0, 10, "TERMO DE RESPONSABILIDADE E USO DOS RECURSOS DE TI", ln=True, align="C")
+    pdf.cell(0, 10, converter_texto_latin1("TERMO DE RESPONSABILIDADE E USO DOS RECURSOS DE TI"), ln=True, align="C")
     pdf.ln(5)
     pdf.set_font("Arial", "", 10.5)
     
@@ -129,7 +133,7 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
         "Ao receber acesso aos sistemas, equipamentos e recursos tecnológicos da Ferpam, o colaborador "
         "declara estar ciente e concorda com as seguintes responsabilidades:\n\n"
     )
-    pdf.multi_cell(0, 5, intro)
+    pdf.multi_cell(0, 5, converter_texto_latin1(intro))
 
     diretrizes = [
         "1. Confidencialidade das Informações\nTodas as informações acessadas durante as atividades profissionais são de uso exclusivo da Ferpam e não devem ser divulgadas, compartilhadas ou utilizadas para fins pessoais ou externos sem autorização.\n",
@@ -147,27 +151,27 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
     ]
 
     for item in diretrizes:
-        pdf.multi_cell(0, 5, item)
+        pdf.multi_cell(0, 5, converter_texto_latin1(item))
         pdf.ln(1)
 
     pdf.ln(2)
-    pdf.multi_cell(0, 5, "Declaro estar ciente das orientações acima e comprometo-me a cumpir as normas de utilização dos recursos de Tecnologia da Informação disponibilizados pela Ferpam.\n")
+    pdf.multi_cell(0, 5, converter_texto_latin1("Declaro estar ciente das orientações acima e comprometo-me a cumprir as normas de utilização dos recursos de Tecnologia da Informação disponibilizados pela Ferpam.\n"))
     pdf.ln(4)
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(4)
 
     pdf.set_font("Arial", "B", 10.5)
-    pdf.cell(0, 6, f"Nome Completo: {nome}", ln=True)
-    pdf.cell(0, 6, f"Cargo: {cargo}", ln=True)
-    pdf.cell(0, 6, f"Setor: {setor}", ln=True)
-    pdf.cell(0, 6, f"Data e Hora do Registro: {data_hora}", ln=True)
+    pdf.cell(0, 6, converter_texto_latin1(f"Nome Completo: {nome}"), ln=True)
+    pdf.cell(0, 6, converter_texto_latin1(f"Cargo: {cargo}"), ln=True)
+    pdf.cell(0, 6, converter_texto_latin1(f"Setor: {setor}"), ln=True)
+    pdf.cell(0, 6, converter_texto_latin1(f"Data e Hora do Registro: {data_hora}"), ln=True)
 
     assinatura_temp = f"assinatura_temp_{funcionario_id}.png"
     try:
         with open(assinatura_temp, "wb") as f:
             f.write(assinatura_bytes)
         pdf.ln(3)
-        pdf.cell(0, 6, "Assinatura Digitalizada:", ln=True)
+        pdf.cell(0, 6, converter_texto_latin1("Assinatura Digitalizada:"), ln=True)
         pdf.image(assinatura_temp, x=20, y=pdf.get_y(), w=65)
         pdf.ln(25)
     finally:
@@ -178,10 +182,10 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
     pdf.set_text_color(100, 116, 139)
     pdf.line(10, pdf.get_y(), 200, pdf.get_y())
     pdf.ln(2)
-    pdf.cell(0, 4, f"Metadados de Validação Jurídica (Lei 14.063/2020)", ln=True)
-    pdf.cell(0, 4, f"ID de Autenticação do Sistema: {funcionario_id}", ln=True)
-    pdf.cell(0, 4, f"Endereço de IP Origem: {ip_cliente}", ln=True)
-    pdf.multi_cell(0, 4, f"Assinatura do Dispositivo (User-Agent): {ua_cliente}")
+    pdf.cell(0, 4, converter_texto_latin1("Metadados de Validação Jurídica (Lei 14.063/2020)"), ln=True)
+    pdf.cell(0, 4, converter_texto_latin1(f"ID de Autenticação do Sistema: {funcionario_id}"), ln=True)
+    pdf.cell(0, 4, converter_texto_latin1(f"Endereço de IP Origem: {ip_cliente}"), ln=True)
+    pdf.multi_cell(0, 4, converter_texto_latin1(f"Assinatura do Dispositivo (User-Agent): {ua_cliente}"))
 
     pdf_bytes = pdf.output(dest="S")
     if isinstance(pdf_bytes, str):
@@ -218,7 +222,6 @@ Equipe de TI - Ferpam"""
         servidor = smtplib.SMTP("smtp.gmail.com", 587)
         servidor.starttls()
         servidor.login(EMAIL, SENHA)
-        # CORREÇÃO: Alterado de message= para msg=
         servidor.sendmail(EMAIL, destinatario, msg=mensagem.as_string())
         servidor.quit()
         return True, "Sucesso"
@@ -226,7 +229,7 @@ Equipe de TI - Ferpam"""
         return False, str(erro)
 
 
-# ---------------- LOGICA DE ROTEAMENTO ----------------
+# ---------------- LOGICA DE ROTEAMENTO E PERSISTÊNCIA ----------------
 url_id = st.query_params.get("id", None)
 
 if url_id:
@@ -311,11 +314,12 @@ if url_id:
 
                 st.rerun()
 else:
-    # --- VISÃO DA TI COM TELA DE LOGIN SEGURA ---
+    # --- VISÃO DA TI COM PERSISTÊNCIA DE SESSÃO NO F5 ---
     st.markdown("<h1 style='text-align: center; color: #0f172a;'>🏢 Gestão de Integração Ferpam</h1>", unsafe_allow_html=True)
     
+    # Mapeamento de autenticação persistente via Query Params
     if "autenticado" not in st.session_state:
-        st.session_state["autenticado"] = False
+        st.session_state["autenticado"] = (st.query_params.get("session") == "ti_logged_in")
 
     if not st.session_state["autenticado"]:
         st.markdown('<div class="login-box">', unsafe_allow_html=True)
@@ -326,15 +330,24 @@ else:
         if st.button("Entrar no Painel", use_container_width=True, type="primary"):
             if usuario_input == st.secrets["credentials"]["usuario_ti"] and senha_input == st.secrets["credentials"]["senha_ti"]:
                 st.session_state["autenticado"] = True
+                st.query_params["session"] = "ti_logged_in"  # Guarda o login no navegador (F5 não desloga!)
                 st.rerun()
             else:
                 st.error("Usuário ou Senha inválidos.")
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.sidebar.markdown(f"Logado como: **{st.secrets['credentials']['usuario_ti']}**")
-        if st.sidebar.button("🚪 Sair do Painel"):
-            st.session_state["autenticado"] = False
-            st.rerun()
+        
+        col_side1, col_side2 = st.sidebar.columns(2)
+        with col_side1:
+            if st.button("🔄 Atualizar", help="Sincronizar dados do banco"):
+                st.rerun()
+        with col_side2:
+            if st.button("🚪 Sair"):
+                st.session_state["autenticado"] = False
+                if "session" in st.query_params:
+                    del st.query_params["session"]
+                st.rerun()
 
         st.markdown("---")
         tab_cadastro, tab_arquivo = st.tabs([
@@ -342,8 +355,7 @@ else:
             "📂 Arquivo de Contratos"
         ])
 
-        # --- ABA 1: CADASTRO (MODIFICADA) ---
-      # --- ABA 1: CADASTRO (CORRIGIDA) ---
+        # --- ABA 1: CADASTRO ---
         with tab_cadastro:
             st.markdown("### 📝 Dados do Novo Colaborador")
             col_a, col_b = st.columns(2)
@@ -354,13 +366,11 @@ else:
                 email_cad = st.text_input("E-mail", placeholder="Ex: joao@ferpam.com.br", key="cad_email")
                 setor_cad = st.text_input("Setor", placeholder="Ex: TI", key="cad_setor")
 
-            # Agora o botão inicial APENAS salva no banco
             if st.button("✨ Salvar e Gerar Link de Assinatura", use_container_width=True, type="primary"):
                 if nome_cad and cargo_cad and email_cad:
                     funcionario_id = str(uuid.uuid4())[:8]
                     setor_envio = setor_cad if setor_cad else "Geral"
                     
-                    # CORREÇÃO: "email_enviado" removido para espelhar perfeitamente suas colunas do banco
                     novo_funcionario = {
                         "id": funcionario_id, "nome": nome_cad, "cargo": cargo_cad, "setor": setor_envio,
                         "email": email_cad, "assinado": False, "assinatura_hex": None, "data_hora": "",
@@ -369,7 +379,8 @@ else:
                     
                     try:
                         supabase.table("funcionarios").insert(novo_funcionario).execute()
-                        st.success(f"✅ {nome_cad} cadastrado com sucesso! Envie o e-mail na lista abaixo quando desejar.")
+                        st.success(f"✅ {nome_cad} cadastrado com sucesso!")
+                        st.rerun()
                     except Exception as erro_banco:
                         st.error(f"❌ Erro ao gravar no Supabase: {erro_banco}")
                 else:
@@ -377,7 +388,7 @@ else:
             
             st.divider()
             
-            # Seção para disparar e-mails manualmente
+            # Disparo Manual
             st.markdown("### ✉️ Disparo Manual de Links")
             resposta_pendentes = supabase.table("funcionarios").select("*").eq("assinado", False).order("nome").execute()
             pendentes_email = resposta_pendentes.data
@@ -393,7 +404,6 @@ else:
                         st.markdown(f"**{p['nome']}** ({p['email']})")
                         st.caption(f"Cargo: {p['cargo']} | Link: `{link_unico}`")
                     with c2:
-                        # Botão que efetivamente envia o e-mail quando você clica
                         if st.button("🚀 Enviar E-mail", key=f"env_mail_{p['id']}", use_container_width=True):
                             enviado, motivo_erro = enviar_email(p["email"], p["nome"], link_unico)
                             if enviado:
@@ -403,7 +413,7 @@ else:
 
         # --- ABA 2: ARQUIVO ---
         with tab_arquivo:
-            st.markdown("### 📂 Contratos Concluídos")
+            st.markdown("### 📂 Contratos Concluídos e Pendentes")
             
             resposta_todos = supabase.table("funcionarios").select("*").order("nome").execute()
             todos_funcionarios = resposta_todos.data
@@ -427,8 +437,9 @@ else:
             st.divider()
 
             if not assinados:
-                st.info("Nenhum termo assinado armazenado em banco ainda.")
+                st.info("Nenhum termo assinado armazenado no banco ainda.")
             else:
+                st.markdown(f"**Termos Assinados ({len(assinados)}):**")
                 for f in assinados:
                     col_info, col_botoes = st.columns([3, 2])
                     with col_info:
@@ -453,6 +464,6 @@ else:
                         with sub_col2:
                             if st.button("❌ Deletar", key=f"del_{f['id']}", type="secondary"):
                                 supabase.table("funcionarios").delete().eq("id", f["id"]).execute()
-                                st.toast(f"Registro de {f['nome']} removed com sucesso!")
+                                st.toast(f"Registro de {f['nome']} removido com sucesso!")
                                 st.rerun()
                     st.divider()
