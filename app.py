@@ -255,16 +255,17 @@ if url_id:
         
         st.subheader("🖊️ Assine abaixo utilizando o mouse ou o dedo:")
 
-    canvas_result = st_canvas(
-                stroke_width=4, 
-                stroke_color="#000000", 
-                background_color="#FFFFFF",    
-                width=680, 
-                height=250, 
-                drawing_mode="freedraw", 
-                key=f"canvas_{url_id}", 
-                update_streamlit=True          
-            )
+        canvas_result = st_canvas(
+            stroke_width=4, 
+            stroke_color="#000000", 
+            background_color="#FFFFFF",    
+            width=680, 
+            height=250, 
+            drawing_mode="freedraw", 
+            key=f"canvas_{url_id}", 
+            update_streamlit=True          
+        )
+
         components.html("""
         <script>
             function interceptarEForcarAltura() {
