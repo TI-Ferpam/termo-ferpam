@@ -118,39 +118,69 @@ def converter_texto_latin1(texto):
     return texto.encode('latin-1', 'replace').decode('latin-1')
 
 
+def verificar_imagem_valida(img):
+    """Garante que a imagem não é completamente branca"""
+    if img is None:
+        return False
+    extrema = img.getextrema()
+    if extrema == ((255, 255), (255, 255), (255, 255)):
+        return False
+    return True
+
+
 def render_fabric_json(json_data, width=680, height=250):
-    """Reconstrói a assinatura somando o pathOffset exato do Fabric.js"""
+    """Renderiza a assinatura verificando dinamicamente coordenadas relativas e absolutas"""
     img = Image.new("RGB", (width, height), (255, 255, 255))
     draw = ImageDraw.Draw(img)
     
     objects = json_data.get("objects", [])
+    if not objects:
+        return img
+
     for obj in objects:
-        if obj.get("type") == "path":
-            path = obj.get("path", [])
-            stroke_width = max(3, int(obj.get("strokeWidth", 4)))
-            stroke_color = obj.get("stroke", "#000000")
+        if obj.get("type") != "path":
+            continue
             
-            # Converte string SVG em lista de comandos se necessário
-            if isinstance(path, str):
-                tokens = re.findall(r'([a-zA-Z])|([-+]?(?:\d*\.\d+|\d+))', path)
-                flat = [t[0] or t[1] for t in tokens]
-                parsed = []
-                i = 0
-                while i < len(flat):
-                    if flat[i].isalpha():
-                        cmd = [flat[i]]
+        path = obj.get("path", [])
+        stroke_width = max(3, int(obj.get("strokeWidth", 4)))
+        stroke_color = obj.get("stroke", "#000000")
+        
+        if isinstance(path, str):
+            tokens = re.findall(r'([a-zA-Z])|([-+]?(?:\d*\.\d+|\d+))', path)
+            flat = [t[0] or t[1] for t in tokens]
+            parsed = []
+            i = 0
+            while i < len(flat):
+                if flat[i].isalpha():
+                    cmd = [flat[i]]
+                    i += 1
+                    while i < len(flat) and not flat[i].isalpha():
+                        cmd.append(float(flat[i]))
                         i += 1
-                        while i < len(flat) and not flat[i].isalpha():
-                            cmd.append(float(flat[i]))
-                            i += 1
-                        parsed.append(cmd)
-                    else:
-                        i += 1
-                path = parsed
-            
-            # 🔥 CORREÇÃO CRÍTICA: Deslocamento do Fabric.js para posicionar o traço no quadro real
-            offset_x = 0.0
-            offset_y = 0.0
+                    parsed.append(cmd)
+                else:
+                    i += 1
+            path = parsed
+
+        xs, ys = [], []
+        for cmd in path:
+            if not cmd:
+                continue
+            c = cmd[0]
+            if c in ("M", "L") and len(cmd) >= 3:
+                xs.append(float(cmd[1]))
+                ys.append(float(cmd[2]))
+            elif c == "Q" and len(cmd) >= 5:
+                xs.extend([float(cmd[1]), float(cmd[3])])
+                ys.extend([float(cmd[2]), float(cmd[4])])
+            elif c == "C" and len(cmd) >= 7:
+                xs.extend([float(cmd[1]), float(cmd[3]), float(cmd[5])])
+                ys.extend([float(cmd[2]), float(cmd[4]), float(cmd[6])])
+
+        # Aplica o offset somente se os pontos estiverem centrados (com valores negativos)
+        offset_x = 0.0
+        offset_y = 0.0
+        if xs and ys and (min(xs) < -0.5 or min(ys) < -0.5):
             path_offset = obj.get("pathOffset")
             if isinstance(path_offset, dict):
                 offset_x = float(path_offset.get("x", 0.0))
@@ -158,74 +188,75 @@ def render_fabric_json(json_data, width=680, height=250):
             elif "left" in obj and "top" in obj:
                 offset_x = float(obj.get("left", 0.0))
                 offset_y = float(obj.get("top", 0.0))
-            
-            curr_pos = (offset_x, offset_y)
-            for cmd in path:
-                if not cmd:
-                    continue
-                c = cmd[0]
-                if c == "M" and len(cmd) >= 3:
-                    curr_pos = (float(cmd[1]) + offset_x, float(cmd[2]) + offset_y)
-                elif c == "L" and len(cmd) >= 3:
-                    next_pos = (float(cmd[1]) + offset_x, float(cmd[2]) + offset_y)
-                    draw.line([curr_pos, next_pos], fill=stroke_color, width=stroke_width)
-                    draw.ellipse([next_pos[0]-stroke_width/2, next_pos[1]-stroke_width/2,
-                                  next_pos[0]+stroke_width/2, next_pos[1]+stroke_width/2], fill=stroke_color)
-                    curr_pos = next_pos
-                elif c == "Q" and len(cmd) >= 5:
-                    x0, y0 = curr_pos
-                    cx, cy = float(cmd[1]) + offset_x, float(cmd[2]) + offset_y
-                    x1, y1 = float(cmd[3]) + offset_x, float(cmd[4]) + offset_y
-                    steps = 12
-                    points = [curr_pos]
-                    for i in range(1, steps + 1):
-                        t = i / steps
-                        xt = (1-t)**2 * x0 + 2*(1-t)*t * cx + t**2 * x1
-                        yt = (1-t)**2 * y0 + 2*(1-t)*t * cy + t**2 * y1
-                        points.append((xt, yt))
-                    for p_i in range(len(points) - 1):
-                        draw.line([points[p_i], points[p_i+1]], fill=stroke_color, width=stroke_width)
-                        draw.ellipse([points[p_i+1][0]-stroke_width/2, points[p_i+1][1]-stroke_width/2,
-                                      points[p_i+1][0]+stroke_width/2, points[p_i+1][1]+stroke_width/2], fill=stroke_color)
-                    curr_pos = (x1, y1)
-                elif c == "C" and len(cmd) >= 7:
-                    x0, y0 = curr_pos
-                    cx1, cy1 = float(cmd[1]) + offset_x, float(cmd[2]) + offset_y
-                    cx2, cy2 = float(cmd[3]) + offset_x, float(cmd[4]) + offset_y
-                    x1, y1 = float(cmd[5]) + offset_x, float(cmd[6]) + offset_y
-                    steps = 12
-                    points = [curr_pos]
-                    for i in range(1, steps + 1):
-                        t = i / steps
-                        xt = (1-t)**3 * x0 + 3*(1-t)**2 * t * cx1 + 3*(1-t)*t**2 * cx2 + t**3 * x1
-                        yt = (1-t)**3 * y0 + 3*(1-t)**2 * t * cy1 + 3*(1-t)*t**2 * cy2 + t**3 * y1
-                        points.append((xt, yt))
-                    for p_i in range(len(points) - 1):
-                        draw.line([points[p_i], points[p_i+1]], fill=stroke_color, width=stroke_width)
-                        draw.ellipse([points[p_i+1][0]-stroke_width/2, points[p_i+1][1]-stroke_width/2,
-                                      points[p_i+1][0]+stroke_width/2, points[p_i+1][1]+stroke_width/2], fill=stroke_color)
-                    curr_pos = (x1, y1)
+
+        curr_pos = (offset_x, offset_y)
+        for cmd in path:
+            if not cmd:
+                continue
+            c = cmd[0]
+            if c == "M" and len(cmd) >= 3:
+                curr_pos = (float(cmd[1]) + offset_x, float(cmd[2]) + offset_y)
+            elif c == "L" and len(cmd) >= 3:
+                next_pos = (float(cmd[1]) + offset_x, float(cmd[2]) + offset_y)
+                draw.line([curr_pos, next_pos], fill=stroke_color, width=stroke_width)
+                draw.ellipse([next_pos[0]-stroke_width/2, next_pos[1]-stroke_width/2,
+                              next_pos[0]+stroke_width/2, next_pos[1]+stroke_width/2], fill=stroke_color)
+                curr_pos = next_pos
+            elif c == "Q" and len(cmd) >= 5:
+                x0, y0 = curr_pos
+                cx, cy = float(cmd[1]) + offset_x, float(cmd[2]) + offset_y
+                x1, y1 = float(cmd[3]) + offset_x, float(cmd[4]) + offset_y
+                steps = 10
+                for i in range(1, steps + 1):
+                    t = i / steps
+                    xt = (1-t)**2 * x0 + 2*(1-t)*t * cx + t**2 * x1
+                    yt = (1-t)**2 * y0 + 2*(1-t)*t * cy + t**2 * y1
+                    draw.line([curr_pos, (xt, yt)], fill=stroke_color, width=stroke_width)
+                    draw.ellipse([xt-stroke_width/2, yt-stroke_width/2,
+                                  xt+stroke_width/2, yt+stroke_width/2], fill=stroke_color)
+                    curr_pos = (xt, yt)
+                curr_pos = (x1, y1)
+            elif c == "C" and len(cmd) >= 7:
+                x0, y0 = curr_pos
+                cx1, cy1 = float(cmd[1]) + offset_x, float(cmd[2]) + offset_y
+                cx2, cy2 = float(cmd[3]) + offset_x, float(cmd[4]) + offset_y
+                x1, y1 = float(cmd[5]) + offset_x, float(cmd[6]) + offset_y
+                steps = 10
+                for i in range(1, steps + 1):
+                    t = i / steps
+                    xt = (1-t)**3 * x0 + 3*(1-t)**2 * t * cx1 + 3*(1-t)*t**2 * cx2 + t**3 * x1
+                    yt = (1-t)**3 * y0 + 3*(1-t)**2 * t * cy1 + 3*(1-t)*t**2 * cy2 + t**3 * y1
+                    draw.line([curr_pos, (xt, yt)], fill=stroke_color, width=stroke_width)
+                    draw.ellipse([xt-stroke_width/2, yt-stroke_width/2,
+                                  xt+stroke_width/2, yt+stroke_width/2], fill=stroke_color)
+                    curr_pos = (xt, yt)
+                curr_pos = (x1, y1)
+
     return img
 
 
 def extrair_imagem_assinatura(canvas_res):
-    """Extrai a assinatura vetorial garantindo traços visíveis e sem imagem em branco"""
+    """Extrai a assinatura testando sucessivamente o formato vetorial e o nativo"""
     if canvas_res is None:
         return None
-        
-    # Dá preferência para reconstruir os traços vetoriais com a posição correta
+
+    # 1. Tentativa via reconstrução vetorial
     if hasattr(canvas_res, "json_data") and canvas_res.json_data:
         objects = canvas_res.json_data.get("objects", [])
         if len(objects) > 0:
-            return render_fabric_json(canvas_res.json_data, width=680, height=250)
+            img = render_fabric_json(canvas_res.json_data, width=680, height=250)
+            if verificar_imagem_valida(img):
+                return img
 
-    # Fallback para o bitmap nativo caso o JSON não venha preenchido
+    # 2. Tentativa via bitmap nativo
     try:
         if hasattr(canvas_res, "image_data") and canvas_res.image_data is not None:
             img_arr = canvas_res.image_data.astype("uint8")
             img = Image.fromarray(img_arr)
             background = Image.new("RGBA", img.size, (255, 255, 255))
-            return Image.alpha_composite(background, img).convert("RGB")
+            final_img = Image.alpha_composite(background, img).convert("RGB")
+            if verificar_imagem_valida(final_img):
+                return final_img
     except Exception:
         pass
 
@@ -381,7 +412,7 @@ if url_id:
             update_streamlit=True          
         )
 
-        # Atualiza o cache da imagem com os traços reais
+        # Regista a assinatura no cache sempre que for desenhada uma linha válida
         img_temp = extrair_imagem_assinatura(canvas_result)
         if img_temp is not None:
             st.session_state[f"cache_img_{url_id}"] = img_temp
@@ -416,8 +447,8 @@ if url_id:
             if img_final is None:
                 img_final = extrair_imagem_assinatura(canvas_result)
 
-            if img_final is None:
-                st.error("O quadro de assinatura está vazio. Por favor, faça sua assinatura antes de clicar em enviar.")
+            if img_final is None or not verificar_imagem_valida(img_final):
+                st.error("O quadro de assinatura está vazio ou o traço não foi detetado. Por favor, assine claramente antes de enviar.")
             else:
                 ip_val = st.session_state.get("ip_cliente")
                 ua_val = st.session_state.get("ua_cliente")
