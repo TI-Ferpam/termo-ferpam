@@ -266,15 +266,18 @@ if url_id:
             update_streamlit=True          
         )
 
-        # 🔥 CORREÇÃO: Salva o desenho no cache em tempo real para evitar erro no botão
+        # 🔥 CORREÇÃO AVANÇADA: Sincronização flexível do desenho
+        tem_tracos = False
         if canvas_result and canvas_result.json_data:
             if len(canvas_result.json_data.get("objects", [])) > 0:
+                tem_tracos = True
                 try:
-                    st.session_state[f"cache_assinatura_{url_id}"] = canvas_result.image_data.astype("uint8")
-                except RuntimeError:
-                    pass # Ignora silenciosamente até o componente sincronizar a imagem
+                    # Captura a imagem apenas se a biblioteca não lançar RuntimeError
+                    if canvas_result.image_data is not None:
+                        st.session_state[f"cache_assinatura_{url_id}"] = canvas_result.image_data.astype("uint8")
+                except (RuntimeError, AttributeError):
+                    pass # Ignora e confia no que já está na memória ou tenta no momento do clique
             else:
-                # Se o quadro estiver vazio (ex: usuário usou a borracha/lixeira), limpa o cache
                 st.session_state.pop(f"cache_assinatura_{url_id}", None)
 
         components.html("""
@@ -298,14 +301,22 @@ if url_id:
         ua_capturado = st_javascript("window.navigator.userAgent")
 
         if st.button("💾 Enviar Assinatura Concluída", type="primary", use_container_width=True):
-            # Verifica a assinatura direto no cache seguro
-            if f"cache_assinatura_{url_id}" not in st.session_state:
-                st.error("O quadro está vazio ou a assinatura ainda não foi processada. Por favor, faça sua assinatura antes de enviar.")
+            # Verifica se há traços desenhados OU se já existe imagem salva
+            if not tem_tracos and f"cache_assinatura_{url_id}" not in st.session_state:
+                st.error("O quadro está vazio. Por favor, faça sua assinatura antes de enviar.")
             else:
+                # Tenta obter a imagem do cache, caso falhe, tenta obter na hora
+                img_array = st.session_state.get(f"cache_assinatura_{url_id}")
+                if img_array is None:
+                    try:
+                        img_array = canvas_result.image_data.astype("uint8")
+                    except (RuntimeError, AttributeError):
+                        st.error("Falha ao capturar a imagem. Por favor, faça um pequeno ponto na assinatura e clique em Enviar novamente.")
+                        st.stop()
+
                 ip_final = str(ip_capturado) if (ip_capturado and ip_capturado != "False") else "IP Não identificado"
                 ua_final = str(ua_capturado) if (ua_capturado and ua_capturado != "False") else "Dispositivo Desconhecido"
 
-                img_array = st.session_state[f"cache_assinatura_{url_id}"]
                 img = Image.fromarray(img_array)
                 background = Image.new("RGBA", img.size, (255, 255, 255))
                 img_final = Image.alpha_composite(background, img).convert("RGB")
