@@ -119,17 +119,18 @@ def converter_texto_latin1(texto):
 
 
 def render_fabric_json(json_data, width=680, height=250):
-    """Renderiza os traços vetoriais em imagem quando a biblioteca falha na exportação"""
-    img = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+    """Reconstrói a assinatura somando o pathOffset exato do Fabric.js"""
+    img = Image.new("RGB", (width, height), (255, 255, 255))
     draw = ImageDraw.Draw(img)
     
     objects = json_data.get("objects", [])
     for obj in objects:
         if obj.get("type") == "path":
             path = obj.get("path", [])
-            stroke_width = max(1, int(obj.get("strokeWidth", 4)))
+            stroke_width = max(3, int(obj.get("strokeWidth", 4)))
             stroke_color = obj.get("stroke", "#000000")
             
+            # Converte string SVG em lista de comandos se necessário
             if isinstance(path, str):
                 tokens = re.findall(r'([a-zA-Z])|([-+]?(?:\d*\.\d+|\d+))', path)
                 flat = [t[0] or t[1] for t in tokens]
@@ -147,24 +148,35 @@ def render_fabric_json(json_data, width=680, height=250):
                         i += 1
                 path = parsed
             
-            curr_pos = (0, 0)
+            # 🔥 CORREÇÃO CRÍTICA: Deslocamento do Fabric.js para posicionar o traço no quadro real
+            offset_x = 0.0
+            offset_y = 0.0
+            path_offset = obj.get("pathOffset")
+            if isinstance(path_offset, dict):
+                offset_x = float(path_offset.get("x", 0.0))
+                offset_y = float(path_offset.get("y", 0.0))
+            elif "left" in obj and "top" in obj:
+                offset_x = float(obj.get("left", 0.0))
+                offset_y = float(obj.get("top", 0.0))
+            
+            curr_pos = (offset_x, offset_y)
             for cmd in path:
                 if not cmd:
                     continue
                 c = cmd[0]
                 if c == "M" and len(cmd) >= 3:
-                    curr_pos = (float(cmd[1]), float(cmd[2]))
+                    curr_pos = (float(cmd[1]) + offset_x, float(cmd[2]) + offset_y)
                 elif c == "L" and len(cmd) >= 3:
-                    next_pos = (float(cmd[1]), float(cmd[2]))
+                    next_pos = (float(cmd[1]) + offset_x, float(cmd[2]) + offset_y)
                     draw.line([curr_pos, next_pos], fill=stroke_color, width=stroke_width)
                     draw.ellipse([next_pos[0]-stroke_width/2, next_pos[1]-stroke_width/2,
                                   next_pos[0]+stroke_width/2, next_pos[1]+stroke_width/2], fill=stroke_color)
                     curr_pos = next_pos
                 elif c == "Q" and len(cmd) >= 5:
                     x0, y0 = curr_pos
-                    cx, cy = float(cmd[1]), float(cmd[2])
-                    x1, y1 = float(cmd[3]), float(cmd[4])
-                    steps = 10
+                    cx, cy = float(cmd[1]) + offset_x, float(cmd[2]) + offset_y
+                    x1, y1 = float(cmd[3]) + offset_x, float(cmd[4]) + offset_y
+                    steps = 12
                     points = [curr_pos]
                     for i in range(1, steps + 1):
                         t = i / steps
@@ -178,10 +190,10 @@ def render_fabric_json(json_data, width=680, height=250):
                     curr_pos = (x1, y1)
                 elif c == "C" and len(cmd) >= 7:
                     x0, y0 = curr_pos
-                    cx1, cy1 = float(cmd[1]), float(cmd[2])
-                    cx2, cy2 = float(cmd[3]), float(cmd[4])
-                    x1, y1 = float(cmd[5]), float(cmd[6])
-                    steps = 10
+                    cx1, cy1 = float(cmd[1]) + offset_x, float(cmd[2]) + offset_y
+                    cx2, cy2 = float(cmd[3]) + offset_x, float(cmd[4]) + offset_y
+                    x1, y1 = float(cmd[5]) + offset_x, float(cmd[6]) + offset_y
+                    steps = 12
                     points = [curr_pos]
                     for i in range(1, steps + 1):
                         t = i / steps
@@ -193,28 +205,27 @@ def render_fabric_json(json_data, width=680, height=250):
                         draw.ellipse([points[p_i+1][0]-stroke_width/2, points[p_i+1][1]-stroke_width/2,
                                       points[p_i+1][0]+stroke_width/2, points[p_i+1][1]+stroke_width/2], fill=stroke_color)
                     curr_pos = (x1, y1)
-    return img.convert("RGB")
+    return img
 
 
 def extrair_imagem_assinatura(canvas_res):
-    """Extrai a assinatura com suporte duplo: nativo ou vetorial"""
+    """Extrai a assinatura vetorial garantindo traços visíveis e sem imagem em branco"""
     if canvas_res is None:
         return None
         
+    # Dá preferência para reconstruir os traços vetoriais com a posição correta
+    if hasattr(canvas_res, "json_data") and canvas_res.json_data:
+        objects = canvas_res.json_data.get("objects", [])
+        if len(objects) > 0:
+            return render_fabric_json(canvas_res.json_data, width=680, height=250)
+
+    # Fallback para o bitmap nativo caso o JSON não venha preenchido
     try:
         if hasattr(canvas_res, "image_data") and canvas_res.image_data is not None:
             img_arr = canvas_res.image_data.astype("uint8")
             img = Image.fromarray(img_arr)
             background = Image.new("RGBA", img.size, (255, 255, 255))
             return Image.alpha_composite(background, img).convert("RGB")
-    except Exception:
-        pass
-
-    try:
-        if hasattr(canvas_res, "json_data") and canvas_res.json_data:
-            objects = canvas_res.json_data.get("objects", [])
-            if len(objects) > 0:
-                return render_fabric_json(canvas_res.json_data, width=680, height=250)
     except Exception:
         pass
 
@@ -276,8 +287,8 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
             f.write(assinatura_bytes)
         pdf.ln(3)
         pdf.cell(0, 6, converter_texto_latin1("Assinatura Digitalizada:"), ln=True)
-        pdf.image(assinatura_temp, x=20, y=pdf.get_y(), w=65)
-        pdf.ln(25)
+        pdf.image(assinatura_temp, x=20, y=pdf.get_y(), w=75)
+        pdf.ln(32)
     finally:
         if os.path.exists(assinatura_temp):
             os.remove(assinatura_temp)
@@ -370,7 +381,7 @@ if url_id:
             update_streamlit=True          
         )
 
-        # Guarda a assinatura no cache sempre que o desenho for atualizado
+        # Atualiza o cache da imagem com os traços reais
         img_temp = extrair_imagem_assinatura(canvas_result)
         if img_temp is not None:
             st.session_state[f"cache_img_{url_id}"] = img_temp
@@ -394,7 +405,7 @@ if url_id:
         </script>
         """, height=0, width=0)
 
-        # Captura de IP e User Agent estável no session_state
+        # Captura de IP e User-Agent
         if "ip_cliente" not in st.session_state:
             st.session_state["ip_cliente"] = st_javascript("fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => d.ip)", key="js_ip")
         if "ua_cliente" not in st.session_state:
