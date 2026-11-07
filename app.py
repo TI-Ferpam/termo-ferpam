@@ -4,8 +4,9 @@ import uuid
 import datetime
 import pytz
 import os
+import re
 from io import BytesIO
-from PIL import Image
+from PIL import Image, ImageDraw
 from streamlit_drawable_canvas import st_canvas
 from fpdf import FPDF
 import smtplib
@@ -115,6 +116,109 @@ def renderizar_termo_tela():
 def converter_texto_latin1(texto):
     """Auxiliar para evitar exceção de encode de caracteres no FPDF"""
     return texto.encode('latin-1', 'replace').decode('latin-1')
+
+
+def render_fabric_json(json_data, width=680, height=250):
+    """Renderiza os traços vetoriais em imagem quando a biblioteca falha na exportação"""
+    img = Image.new("RGBA", (width, height), (255, 255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    
+    objects = json_data.get("objects", [])
+    for obj in objects:
+        if obj.get("type") == "path":
+            path = obj.get("path", [])
+            stroke_width = max(1, int(obj.get("strokeWidth", 4)))
+            stroke_color = obj.get("stroke", "#000000")
+            
+            if isinstance(path, str):
+                tokens = re.findall(r'([a-zA-Z])|([-+]?(?:\d*\.\d+|\d+))', path)
+                flat = [t[0] or t[1] for t in tokens]
+                parsed = []
+                i = 0
+                while i < len(flat):
+                    if flat[i].isalpha():
+                        cmd = [flat[i]]
+                        i += 1
+                        while i < len(flat) and not flat[i].isalpha():
+                            cmd.append(float(flat[i]))
+                            i += 1
+                        parsed.append(cmd)
+                    else:
+                        i += 1
+                path = parsed
+            
+            curr_pos = (0, 0)
+            for cmd in path:
+                if not cmd:
+                    continue
+                c = cmd[0]
+                if c == "M" and len(cmd) >= 3:
+                    curr_pos = (float(cmd[1]), float(cmd[2]))
+                elif c == "L" and len(cmd) >= 3:
+                    next_pos = (float(cmd[1]), float(cmd[2]))
+                    draw.line([curr_pos, next_pos], fill=stroke_color, width=stroke_width)
+                    draw.ellipse([next_pos[0]-stroke_width/2, next_pos[1]-stroke_width/2,
+                                  next_pos[0]+stroke_width/2, next_pos[1]+stroke_width/2], fill=stroke_color)
+                    curr_pos = next_pos
+                elif c == "Q" and len(cmd) >= 5:
+                    x0, y0 = curr_pos
+                    cx, cy = float(cmd[1]), float(cmd[2])
+                    x1, y1 = float(cmd[3]), float(cmd[4])
+                    steps = 10
+                    points = [curr_pos]
+                    for i in range(1, steps + 1):
+                        t = i / steps
+                        xt = (1-t)**2 * x0 + 2*(1-t)*t * cx + t**2 * x1
+                        yt = (1-t)**2 * y0 + 2*(1-t)*t * cy + t**2 * y1
+                        points.append((xt, yt))
+                    for p_i in range(len(points) - 1):
+                        draw.line([points[p_i], points[p_i+1]], fill=stroke_color, width=stroke_width)
+                        draw.ellipse([points[p_i+1][0]-stroke_width/2, points[p_i+1][1]-stroke_width/2,
+                                      points[p_i+1][0]+stroke_width/2, points[p_i+1][1]+stroke_width/2], fill=stroke_color)
+                    curr_pos = (x1, y1)
+                elif c == "C" and len(cmd) >= 7:
+                    x0, y0 = curr_pos
+                    cx1, cy1 = float(cmd[1]), float(cmd[2])
+                    cx2, cy2 = float(cmd[3]), float(cmd[4])
+                    x1, y1 = float(cmd[5]), float(cmd[6])
+                    steps = 10
+                    points = [curr_pos]
+                    for i in range(1, steps + 1):
+                        t = i / steps
+                        xt = (1-t)**3 * x0 + 3*(1-t)**2 * t * cx1 + 3*(1-t)*t**2 * cx2 + t**3 * x1
+                        yt = (1-t)**3 * y0 + 3*(1-t)**2 * t * cy1 + 3*(1-t)*t**2 * cy2 + t**3 * y1
+                        points.append((xt, yt))
+                    for p_i in range(len(points) - 1):
+                        draw.line([points[p_i], points[p_i+1]], fill=stroke_color, width=stroke_width)
+                        draw.ellipse([points[p_i+1][0]-stroke_width/2, points[p_i+1][1]-stroke_width/2,
+                                      points[p_i+1][0]+stroke_width/2, points[p_i+1][1]+stroke_width/2], fill=stroke_color)
+                    curr_pos = (x1, y1)
+    return img.convert("RGB")
+
+
+def extrair_imagem_assinatura(canvas_res):
+    """Extrai a assinatura com suporte duplo: nativo ou vetorial"""
+    if canvas_res is None:
+        return None
+        
+    try:
+        if hasattr(canvas_res, "image_data") and canvas_res.image_data is not None:
+            img_arr = canvas_res.image_data.astype("uint8")
+            img = Image.fromarray(img_arr)
+            background = Image.new("RGBA", img.size, (255, 255, 255))
+            return Image.alpha_composite(background, img).convert("RGB")
+    except Exception:
+        pass
+
+    try:
+        if hasattr(canvas_res, "json_data") and canvas_res.json_data:
+            objects = canvas_res.json_data.get("objects", [])
+            if len(objects) > 0:
+                return render_fabric_json(canvas_res.json_data, width=680, height=250)
+    except Exception:
+        pass
+
+    return None
 
 
 def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funcionario_id, ip_cliente="Não capturado", ua_cliente="Não capturado"):
@@ -266,19 +370,12 @@ if url_id:
             update_streamlit=True          
         )
 
-        # 🔥 CORREÇÃO AVANÇADA: Sincronização flexível do desenho
-        tem_tracos = False
-        if canvas_result and canvas_result.json_data:
-            if len(canvas_result.json_data.get("objects", [])) > 0:
-                tem_tracos = True
-                try:
-                    # Captura a imagem apenas se a biblioteca não lançar RuntimeError
-                    if canvas_result.image_data is not None:
-                        st.session_state[f"cache_assinatura_{url_id}"] = canvas_result.image_data.astype("uint8")
-                except (RuntimeError, AttributeError):
-                    pass # Ignora e confia no que já está na memória ou tenta no momento do clique
-            else:
-                st.session_state.pop(f"cache_assinatura_{url_id}", None)
+        # Guarda a assinatura no cache sempre que o desenho for atualizado
+        img_temp = extrair_imagem_assinatura(canvas_result)
+        if img_temp is not None:
+            st.session_state[f"cache_img_{url_id}"] = img_temp
+        elif canvas_result and canvas_result.json_data and not canvas_result.json_data.get("objects"):
+            st.session_state.pop(f"cache_img_{url_id}", None)
 
         components.html("""
         <script>
@@ -297,29 +394,24 @@ if url_id:
         </script>
         """, height=0, width=0)
 
-        ip_capturado = st_javascript("fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => d.ip)")
-        ua_capturado = st_javascript("window.navigator.userAgent")
+        # Captura de IP e User Agent estável no session_state
+        if "ip_cliente" not in st.session_state:
+            st.session_state["ip_cliente"] = st_javascript("fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => d.ip)", key="js_ip")
+        if "ua_cliente" not in st.session_state:
+            st.session_state["ua_cliente"] = st_javascript("window.navigator.userAgent", key="js_ua")
 
         if st.button("💾 Enviar Assinatura Concluída", type="primary", use_container_width=True):
-            # Verifica se há traços desenhados OU se já existe imagem salva
-            if not tem_tracos and f"cache_assinatura_{url_id}" not in st.session_state:
-                st.error("O quadro está vazio. Por favor, faça sua assinatura antes de enviar.")
+            img_final = st.session_state.get(f"cache_img_{url_id}")
+            if img_final is None:
+                img_final = extrair_imagem_assinatura(canvas_result)
+
+            if img_final is None:
+                st.error("O quadro de assinatura está vazio. Por favor, faça sua assinatura antes de clicar em enviar.")
             else:
-                # Tenta obter a imagem do cache, caso falhe, tenta obter na hora
-                img_array = st.session_state.get(f"cache_assinatura_{url_id}")
-                if img_array is None:
-                    try:
-                        img_array = canvas_result.image_data.astype("uint8")
-                    except (RuntimeError, AttributeError):
-                        st.error("Falha ao capturar a imagem. Por favor, faça um pequeno ponto na assinatura e clique em Enviar novamente.")
-                        st.stop()
-
-                ip_final = str(ip_capturado) if (ip_capturado and ip_capturado != "False") else "IP Não identificado"
-                ua_final = str(ua_capturado) if (ua_capturado and ua_capturado != "False") else "Dispositivo Desconhecido"
-
-                img = Image.fromarray(img_array)
-                background = Image.new("RGBA", img.size, (255, 255, 255))
-                img_final = Image.alpha_composite(background, img).convert("RGB")
+                ip_val = st.session_state.get("ip_cliente")
+                ua_val = st.session_state.get("ua_cliente")
+                ip_final = str(ip_val) if (ip_val and ip_val != "False" and ip_val != 0) else "IP Não identificado"
+                ua_final = str(ua_val) if (ua_val and ua_val != "False" and ua_val != 0) else "Dispositivo Desconhecido"
 
                 buffered = BytesIO()
                 img_final.save(buffered, format="PNG")
@@ -341,7 +433,6 @@ else:
     # --- VISÃO DA TI COM PERSISTÊNCIA DE SESSÃO NO F5 ---
     st.markdown("<h1 style='text-align: center; color: #0f172a;'>🏢 Gestão de Integração Ferpam</h1>", unsafe_allow_html=True)
     
-    # Mapeamento de autenticação persistente via Query Params
     if "autenticado" not in st.session_state:
         st.session_state["autenticado"] = (st.query_params.get("session") == "ti_logged_in")
 
@@ -354,7 +445,7 @@ else:
         if st.button("Entrar no Painel", use_container_width=True, type="primary"):
             if usuario_input == st.secrets["credentials"]["usuario_ti"] and senha_input == st.secrets["credentials"]["senha_ti"]:
                 st.session_state["autenticado"] = True
-                st.query_params["session"] = "ti_logged_in"  # Guarda o login no navegador (F5 não desloga!)
+                st.query_params["session"] = "ti_logged_in"
                 st.rerun()
             else:
                 st.error("Usuário ou Senha inválidos.")
@@ -412,7 +503,6 @@ else:
             
             st.divider()
             
-            # Disparo Manual
             st.markdown("### ✉️ Disparo Manual de Links")
             resposta_pendentes = supabase.table("funcionarios").select("*").eq("assinado", False).order("nome").execute()
             pendentes_email = resposta_pendentes.data
