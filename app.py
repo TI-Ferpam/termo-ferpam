@@ -266,6 +266,17 @@ if url_id:
             update_streamlit=True          
         )
 
+        # 🔥 CORREÇÃO: Salva o desenho no cache em tempo real para evitar erro no botão
+        if canvas_result and canvas_result.json_data:
+            if len(canvas_result.json_data.get("objects", [])) > 0:
+                try:
+                    st.session_state[f"cache_assinatura_{url_id}"] = canvas_result.image_data.astype("uint8")
+                except RuntimeError:
+                    pass # Ignora silenciosamente até o componente sincronizar a imagem
+            else:
+                # Se o quadro estiver vazio (ex: usuário usou a borracha/lixeira), limpa o cache
+                st.session_state.pop(f"cache_assinatura_{url_id}", None)
+
         components.html("""
         <script>
             function interceptarEForcarAltura() {
@@ -287,17 +298,14 @@ if url_id:
         ua_capturado = st_javascript("window.navigator.userAgent")
 
         if st.button("💾 Enviar Assinatura Concluída", type="primary", use_container_width=True):
-            tem_desenho = False
-            if canvas_result.json_data is not None and len(canvas_result.json_data.get("objects", [])) > 0:
-                tem_desenho = True
-
-            if not tem_desenho:
-                st.error("O quadro de assinatura está vazio. Por favor, faça sua assinatura antes de clicar em enviar.")
+            # Verifica a assinatura direto no cache seguro
+            if f"cache_assinatura_{url_id}" not in st.session_state:
+                st.error("O quadro está vazio ou a assinatura ainda não foi processada. Por favor, faça sua assinatura antes de enviar.")
             else:
                 ip_final = str(ip_capturado) if (ip_capturado and ip_capturado != "False") else "IP Não identificado"
                 ua_final = str(ua_capturado) if (ua_capturado and ua_capturado != "False") else "Dispositivo Desconhecido"
 
-                img_array = canvas_result.image_data.astype("uint8")
+                img_array = st.session_state[f"cache_assinatura_{url_id}"]
                 img = Image.fromarray(img_array)
                 background = Image.new("RGBA", img.size, (255, 255, 255))
                 img_final = Image.alpha_composite(background, img).convert("RGB")
