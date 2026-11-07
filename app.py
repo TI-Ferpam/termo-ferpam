@@ -56,9 +56,7 @@ st.markdown("""
         padding: 0px !important;
     }
     iframe[title="streamlit_drawable_canvas.st_canvas"] {
-        height: 250px !important;
-        min-height: 250px !important;
-        border: 2px solid #cbd5e1 !important;
+        border: 2px solid #94a3b8 !important;
         border-radius: 8px !important;
         background-color: #ffffff !important;
         display: block !important;
@@ -115,151 +113,123 @@ def renderizar_termo_tela():
 
 def converter_texto_latin1(texto):
     """Auxiliar para evitar exceção de encode de caracteres no FPDF"""
-    return texto.encode('latin-1', 'replace').decode('latin-1')
+    return str(texto).encode('latin-1', 'replace').decode('latin-1')
 
 
-def verificar_imagem_valida(img):
-    """Garante que a imagem não é completamente branca"""
-    if img is None:
-        return False
-    extrema = img.getextrema()
-    if extrema == ((255, 255), (255, 255), (255, 255)):
-        return False
-    return True
-
-
-def render_fabric_json(json_data, width=680, height=250):
-    """Renderiza a assinatura verificando dinamicamente coordenadas relativas e absolutas"""
-    img = Image.new("RGB", (width, height), (255, 255, 255))
-    draw = ImageDraw.Draw(img)
-    
+def render_fabric_drawing(json_data, width=680, height=250):
+    """Renderiza com precisão os traços do Fabric.js para imagem PIL"""
+    if not json_data or not isinstance(json_data, dict):
+        return None
+        
     objects = json_data.get("objects", [])
     if not objects:
-        return img
+        return None
+
+    img = Image.new("RGB", (width, height), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    linhas_desenhadas = 0
 
     for obj in objects:
         if obj.get("type") != "path":
             continue
             
         path = obj.get("path", [])
-        stroke_width = max(3, int(obj.get("strokeWidth", 4)))
+        if not path:
+            continue
+            
         stroke_color = obj.get("stroke", "#000000")
-        
-        if isinstance(path, str):
-            tokens = re.findall(r'([a-zA-Z])|([-+]?(?:\d*\.\d+|\d+))', path)
-            flat = [t[0] or t[1] for t in tokens]
-            parsed = []
-            i = 0
-            while i < len(flat):
-                if flat[i].isalpha():
-                    cmd = [flat[i]]
-                    i += 1
-                    while i < len(flat) and not flat[i].isalpha():
-                        cmd.append(float(flat[i]))
-                        i += 1
-                    parsed.append(cmd)
-                else:
-                    i += 1
-            path = parsed
+        stroke_width = max(3, int(obj.get("strokeWidth", 4)))
 
-        xs, ys = [], []
+        # Coleta os pontos da curva
+        raw_pts = []
         for cmd in path:
             if not cmd:
                 continue
             c = cmd[0]
-            if c in ("M", "L") and len(cmd) >= 3:
-                xs.append(float(cmd[1]))
-                ys.append(float(cmd[2]))
-            elif c == "Q" and len(cmd) >= 5:
-                xs.extend([float(cmd[1]), float(cmd[3])])
-                ys.extend([float(cmd[2]), float(cmd[4])])
-            elif c == "C" and len(cmd) >= 7:
-                xs.extend([float(cmd[1]), float(cmd[3]), float(cmd[5])])
-                ys.extend([float(cmd[2]), float(cmd[4]), float(cmd[6])])
+            if c in ("M", "L", "m", "l") and len(cmd) >= 3:
+                raw_pts.append((float(cmd[1]), float(cmd[2])))
+            elif c in ("Q", "q") and len(cmd) >= 5:
+                raw_pts.append((float(cmd[1]), float(cmd[2])))
+                raw_pts.append((float(cmd[3]), float(cmd[4])))
+            elif c in ("C", "c") and len(cmd) >= 7:
+                raw_pts.append((float(cmd[1]), float(cmd[2])))
+                raw_pts.append((float(cmd[3]), float(cmd[4])))
+                raw_pts.append((float(cmd[5]), float(cmd[6])))
 
-        # Aplica o offset somente se os pontos estiverem centrados (com valores negativos)
-        offset_x = 0.0
-        offset_y = 0.0
-        if xs and ys and (min(xs) < -0.5 or min(ys) < -0.5):
-            path_offset = obj.get("pathOffset")
-            if isinstance(path_offset, dict):
-                offset_x = float(path_offset.get("x", 0.0))
-                offset_y = float(path_offset.get("y", 0.0))
-            elif "left" in obj and "top" in obj:
-                offset_x = float(obj.get("left", 0.0))
-                offset_y = float(obj.get("top", 0.0))
+        if not raw_pts:
+            continue
 
-        curr_pos = (offset_x, offset_y)
+        min_x = min(p[0] for p in raw_pts)
+        min_y = min(p[1] for p in raw_pts)
+        max_x = max(p[0] for p in raw_pts)
+        max_y = max(p[1] for p in raw_pts)
+
+        # Determina se os pontos são relativos ao centro (negativos) ou absolutos
+        path_offset = obj.get("pathOffset", {})
+        po_x = float(path_offset.get("x", 0.0)) if isinstance(path_offset, dict) else 0.0
+        po_y = float(path_offset.get("y", 0.0)) if isinstance(path_offset, dict) else 0.0
+
+        if min_x < -0.5 or min_y < -0.5:
+            shift_x = po_x
+            shift_y = po_y
+        else:
+            if max_x <= width + 50 and max_y <= height + 50:
+                shift_x = 0.0
+                shift_y = 0.0
+            else:
+                shift_x = float(obj.get("left", 0.0))
+                shift_y = float(obj.get("top", 0.0))
+
+        curr = (shift_x, shift_y)
         for cmd in path:
             if not cmd:
                 continue
             c = cmd[0]
-            if c == "M" and len(cmd) >= 3:
-                curr_pos = (float(cmd[1]) + offset_x, float(cmd[2]) + offset_y)
-            elif c == "L" and len(cmd) >= 3:
-                next_pos = (float(cmd[1]) + offset_x, float(cmd[2]) + offset_y)
-                draw.line([curr_pos, next_pos], fill=stroke_color, width=stroke_width)
-                draw.ellipse([next_pos[0]-stroke_width/2, next_pos[1]-stroke_width/2,
-                              next_pos[0]+stroke_width/2, next_pos[1]+stroke_width/2], fill=stroke_color)
-                curr_pos = next_pos
-            elif c == "Q" and len(cmd) >= 5:
-                x0, y0 = curr_pos
-                cx, cy = float(cmd[1]) + offset_x, float(cmd[2]) + offset_y
-                x1, y1 = float(cmd[3]) + offset_x, float(cmd[4]) + offset_y
+            if c in ("M", "m") and len(cmd) >= 3:
+                curr = (float(cmd[1]) + shift_x, float(cmd[2]) + shift_y)
+                draw.ellipse([curr[0]-stroke_width/2, curr[1]-stroke_width/2,
+                              curr[0]+stroke_width/2, curr[1]+stroke_width/2], fill=stroke_color)
+            elif c in ("L", "l") and len(cmd) >= 3:
+                nxt = (float(cmd[1]) + shift_x, float(cmd[2]) + shift_y)
+                draw.line([curr, nxt], fill=stroke_color, width=stroke_width)
+                draw.ellipse([nxt[0]-stroke_width/2, nxt[1]-stroke_width/2,
+                              nxt[0]+stroke_width/2, nxt[1]+stroke_width/2], fill=stroke_color)
+                curr = nxt
+                linhas_desenhadas += 1
+            elif c in ("Q", "q") and len(cmd) >= 5:
+                x0, y0 = curr
+                cx, cy = float(cmd[1]) + shift_x, float(cmd[2]) + shift_y
+                x1, y1 = float(cmd[3]) + shift_x, float(cmd[4]) + shift_y
                 steps = 10
-                for i in range(1, steps + 1):
-                    t = i / steps
+                for s in range(1, steps + 1):
+                    t = s / steps
                     xt = (1-t)**2 * x0 + 2*(1-t)*t * cx + t**2 * x1
                     yt = (1-t)**2 * y0 + 2*(1-t)*t * cy + t**2 * y1
-                    draw.line([curr_pos, (xt, yt)], fill=stroke_color, width=stroke_width)
+                    draw.line([curr, (xt, yt)], fill=stroke_color, width=stroke_width)
                     draw.ellipse([xt-stroke_width/2, yt-stroke_width/2,
                                   xt+stroke_width/2, yt+stroke_width/2], fill=stroke_color)
-                    curr_pos = (xt, yt)
-                curr_pos = (x1, y1)
-            elif c == "C" and len(cmd) >= 7:
-                x0, y0 = curr_pos
-                cx1, cy1 = float(cmd[1]) + offset_x, float(cmd[2]) + offset_y
-                cx2, cy2 = float(cmd[3]) + offset_x, float(cmd[4]) + offset_y
-                x1, y1 = float(cmd[5]) + offset_x, float(cmd[6]) + offset_y
+                    curr = (xt, yt)
+                curr = (x1, y1)
+                linhas_desenhadas += 1
+            elif c in ("C", "c") and len(cmd) >= 7:
+                x0, y0 = curr
+                cx1, cy1 = float(cmd[1]) + shift_x, float(cmd[2]) + shift_y
+                cx2, cy2 = float(cmd[3]) + shift_x, float(cmd[4]) + shift_y
+                x1, y1 = float(cmd[5]) + shift_x, float(cmd[6]) + shift_y
                 steps = 10
-                for i in range(1, steps + 1):
-                    t = i / steps
+                for s in range(1, steps + 1):
+                    t = s / steps
                     xt = (1-t)**3 * x0 + 3*(1-t)**2 * t * cx1 + 3*(1-t)*t**2 * cx2 + t**3 * x1
                     yt = (1-t)**3 * y0 + 3*(1-t)**2 * t * cy1 + 3*(1-t)*t**2 * cy2 + t**3 * y1
-                    draw.line([curr_pos, (xt, yt)], fill=stroke_color, width=stroke_width)
+                    draw.line([curr, (xt, yt)], fill=stroke_color, width=stroke_width)
                     draw.ellipse([xt-stroke_width/2, yt-stroke_width/2,
                                   xt+stroke_width/2, yt+stroke_width/2], fill=stroke_color)
-                    curr_pos = (xt, yt)
-                curr_pos = (x1, y1)
+                    curr = (xt, yt)
+                curr = (x1, y1)
+                linhas_desenhadas += 1
 
-    return img
-
-
-def extrair_imagem_assinatura(canvas_res):
-    """Extrai a assinatura testando sucessivamente o formato vetorial e o nativo"""
-    if canvas_res is None:
-        return None
-
-    # 1. Tentativa via reconstrução vetorial
-    if hasattr(canvas_res, "json_data") and canvas_res.json_data:
-        objects = canvas_res.json_data.get("objects", [])
-        if len(objects) > 0:
-            img = render_fabric_json(canvas_res.json_data, width=680, height=250)
-            if verificar_imagem_valida(img):
-                return img
-
-    # 2. Tentativa via bitmap nativo
-    try:
-        if hasattr(canvas_res, "image_data") and canvas_res.image_data is not None:
-            img_arr = canvas_res.image_data.astype("uint8")
-            img = Image.fromarray(img_arr)
-            background = Image.new("RGBA", img.size, (255, 255, 255))
-            final_img = Image.alpha_composite(background, img).convert("RGB")
-            if verificar_imagem_valida(final_img):
-                return final_img
-    except Exception:
-        pass
-
+    if linhas_desenhadas > 0:
+        return img
     return None
 
 
@@ -312,14 +282,14 @@ def gerar_pdf_contrato(nome, cargo, setor, data_hora, assinatura_bytes, funciona
     pdf.cell(0, 6, converter_texto_latin1(f"Setor: {setor}"), ln=True)
     pdf.cell(0, 6, converter_texto_latin1(f"Data e Hora do Registro: {data_hora}"), ln=True)
 
-    assinatura_temp = f"assinatura_temp_{funcionario_id}.png"
+    assinatura_temp = f"temp_sig_{funcionario_id}.png"
     try:
         with open(assinatura_temp, "wb") as f:
             f.write(assinatura_bytes)
         pdf.ln(3)
         pdf.cell(0, 6, converter_texto_latin1("Assinatura Digitalizada:"), ln=True)
-        pdf.image(assinatura_temp, x=20, y=pdf.get_y(), w=75)
-        pdf.ln(32)
+        pdf.image(assinatura_temp, x=20, y=pdf.get_y(), w=70)
+        pdf.ln(30)
     finally:
         if os.path.exists(assinatura_temp):
             os.remove(assinatura_temp)
@@ -389,8 +359,8 @@ if url_id:
         st.markdown(f"""
             <div class="sucesso-box">
                 <h1 style="color: #166534; margin-top:0;">✓ Termo Assinado com Sucesso!</h1>
-                <p style="font-size: 16px;">Olá <b>{colaborador['nome']}</b>, suas diretrizes de responsabilidade de TI foram registradas.</p>
-                <p style="font-size: 14px; color: #65a30d;">Obrigado! Você já pode fechar esta aba.</p>
+                <p style="font-size: 16px;">Olá <b>{colaborador['nome']}</b>, as suas diretrizes de TI foram registadas com sucesso.</p>
+                <p style="font-size: 14px; color: #65a30d;">Obrigado! Pode fechar esta página.</p>
             </div>
         """, unsafe_allow_html=True)
     else:
@@ -399,56 +369,50 @@ if url_id:
         
         renderizar_termo_tela()
         
-        st.subheader("🖊️ Assine abaixo utilizando o mouse ou o dedo:")
+        st.subheader("🖊️ Assine no quadro abaixo:")
 
         canvas_result = st_canvas(
             stroke_width=4, 
             stroke_color="#000000", 
             background_color="#FFFFFF",    
             width=680, 
-            height=250, 
+            height=220, 
             drawing_mode="freedraw", 
             key=f"canvas_{url_id}", 
             update_streamlit=True          
         )
 
-        # Regista a assinatura no cache sempre que for desenhada uma linha válida
-        img_temp = extrair_imagem_assinatura(canvas_result)
-        if img_temp is not None:
-            st.session_state[f"cache_img_{url_id}"] = img_temp
-        elif canvas_result and canvas_result.json_data and not canvas_result.json_data.get("objects"):
-            st.session_state.pop(f"cache_img_{url_id}", None)
+        # Atualiza a imagem na memória em tempo real sem nunca limpar o cache por acidente
+        if canvas_result and canvas_result.json_data:
+            img_processada = render_fabric_drawing(canvas_result.json_data, width=680, height=220)
+            if img_processada is not None:
+                st.session_state[f"assinatura_valida_{url_id}"] = img_processada
 
-        components.html("""
-        <script>
-            function interceptarEForcarAltura() {
-                try {
-                    var iframes = window.parent.document.querySelectorAll('iframe[title="streamlit_drawable_canvas.st_canvas"]');
-                    iframes.forEach(function(iframe) {
-                        if (iframe.getAttribute('height') !== '250') {
-                            iframe.setAttribute('height', '250');
-                            iframe.style.setProperty('height', '250px', 'important');
-                        }
-                    });
-                } catch (e) {}
-            }
-            setInterval(interceptarEForcarAltura, 200);
-        </script>
-        """, height=0, width=0)
-
-        # Captura de IP e User-Agent
+        # Captura de IP e User-Agent de forma estável
         if "ip_cliente" not in st.session_state:
-            st.session_state["ip_cliente"] = st_javascript("fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => d.ip)", key="js_ip")
+            st.session_state["ip_cliente"] = st_javascript("fetch('https://api.ipify.org?format=json').then(r => r.json()).then(d => d.ip)", key="ip_tracker")
         if "ua_cliente" not in st.session_state:
-            st.session_state["ua_cliente"] = st_javascript("window.navigator.userAgent", key="js_ua")
+            st.session_state["ua_cliente"] = st_javascript("window.navigator.userAgent", key="ua_tracker")
 
-        if st.button("💾 Enviar Assinatura Concluída", type="primary", use_container_width=True):
-            img_final = st.session_state.get(f"cache_img_{url_id}")
+        col_b1, col_b2 = st.columns([4, 1])
+        with col_b1:
+            btn_enviar = st.button("💾 Enviar Assinatura Concluída", type="primary", use_container_width=True)
+        with col_b2:
+            if st.button("🗑️ Limpar"):
+                if f"assinatura_valida_{url_id}" in st.session_state:
+                    del st.session_state[f"assinatura_valida_{url_id}"]
+                st.rerun()
+
+        if btn_enviar:
+            # Obtém a assinatura guardada
+            img_final = st.session_state.get(f"assinatura_valida_{url_id}")
+            
+            # Se ainda não estiver em cache, tenta extrair diretamente
+            if img_final is None and canvas_result and canvas_result.json_data:
+                img_final = render_fabric_drawing(canvas_result.json_data, width=680, height=220)
+
             if img_final is None:
-                img_final = extrair_imagem_assinatura(canvas_result)
-
-            if img_final is None or not verificar_imagem_valida(img_final):
-                st.error("O quadro de assinatura está vazio ou o traço não foi detetado. Por favor, assine claramente antes de enviar.")
+                st.error("O quadro está vazio. Por favor, assine antes de enviar.")
             else:
                 ip_val = st.session_state.get("ip_cliente")
                 ua_val = st.session_state.get("ua_cliente")
